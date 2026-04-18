@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install *)",
+      "Bash(python -c \"import pandas_ta; print\\('pandas_ta version:', pandas_ta.version\\)\")",
+      "Bash(pip list *)",
+      "Bash(python -c \"import sys; print\\(sys.version\\)\")",
+      "Bash(python -c \"import pandas_ta_classic as ta; print\\('Module OK, version:', ta.__version__ if hasattr\\(ta,'__version__'\\) else 'unknown'\\)\")",
+      "Bash(python -c \"import pandas_ta_classic as ta; import pandas as pd; df=pd.DataFrame\\({'close':[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21]}\\); print\\(ta.ema\\(df['close'], length=5\\)\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(netstat -ano)",
+      "Bash(taskkill /PID 23652 /F)",
+      "Bash(kill -9 23652)",
+      "Bash(pkill -f \"python main.py\")",
+      "Bash(cmd /c \"taskkill /PID 23652 /F\")",
+      "Bash(cmd /c \"taskkill /F /PID 23652 2>&1\")",
+      "Bash(cmd /c \"for /f \\\\\"tokens=5\\\\\" %a in \\('netstat -ano ^| findstr :8000 ^| findstr LISTENING'\\) do taskkill /F /PID %a\")",
+      "Bash(python main.py)",
+      "Bash(curl -s http://127.0.0.1:8000/health)",
+      "Bash(python -c \"import subprocess; subprocess.run\\(['taskkill', '/F', '/PID', '5884'], capture_output=True\\)\")",
+      "Bash(curl -s http://127.0.0.1:8000/balance)"
+    ]
+  }
+}

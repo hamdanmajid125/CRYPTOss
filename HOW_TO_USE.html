@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>AI Trade Terminal — How To Use Guide</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Syne:wght@700;800&family=Inter:wght@400;500;600&display=swap');
+  :root {
+    --bg:#060a0f; --bg1:#090e15; --bg2:#0c1520; --bg3:#101c2a;
+    --border:#1a2e44; --border2:#243f5c;
+    --green:#00ff88; --green2:#00cc6a; --greenBg:rgba(0,255,136,0.07);
+    --red:#ff4466; --redBg:rgba(255,68,102,0.07);
+    --gold:#ffcc00; --goldBg:rgba(255,204,0,0.07);
+    --cyan:#00d4ff; --purple:#aa66ff; --orange:#ff8844;
+    --text:#8ab0cc; --textHi:#cce0f5; --textDim:#3a5a7a;
+    --font:'Inter',sans-serif; --mono:'JetBrains Mono',monospace; --title:'Syne',sans-serif;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:var(--font); font-size:14px; line-height:1.7; }
+  body::before { content:''; position:fixed; inset:0; background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,0,0,.02) 3px,rgba(0,0,0,.02) 6px); pointer-events:none; z-index:9999; }
+
+  /* LAYOUT */
+  .sidebar { position:fixed; top:0; left:0; width:240px; height:100vh; background:var(--bg1); border-right:1px solid var(--border); overflow-y:auto; padding:20px 0; z-index:100; }
+  .content { margin-left:240px; max-width:860px; padding:40px 48px 80px; }
+
+  /* SIDEBAR */
+  .sidebar-logo { padding:0 20px 20px; border-bottom:1px solid var(--border); margin-bottom:12px; }
+  .sidebar-logo .name { font-family:var(--title); font-size:15px; font-weight:800; color:var(--textHi); }
+  .sidebar-logo .sub { font-size:10px; color:var(--textDim); letter-spacing:1.5px; margin-top:2px; }
+  .nav-section { padding:8px 20px 4px; font-size:9px; color:var(--textDim); letter-spacing:2px; text-transform:uppercase; }
+  .nav-item { display:block; padding:7px 20px; font-size:12px; color:var(--text); text-decoration:none; border-left:2px solid transparent; transition:all .15s; }
+  .nav-item:hover { background:var(--bg2); color:var(--textHi); border-left-color:var(--border2); }
+  .nav-item.active { color:var(--cyan); border-left-color:var(--cyan); background:rgba(0,212,255,.05); }
+
+  /* CONTENT */
+  h1 { font-family:var(--title); font-size:32px; font-weight:800; color:var(--textHi); margin-bottom:8px; line-height:1.2; }
+  h2 { font-family:var(--title); font-size:22px; font-weight:700; color:var(--textHi); margin:48px 0 16px; padding-bottom:10px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:10px; }
+  h2 .icon { font-size:20px; }
+  h3 { font-size:15px; font-weight:600; color:var(--cyan); margin:24px 0 10px; }
+  p { margin-bottom:12px; }
+  strong { color:var(--textHi); font-weight:600; }
+  code { font-family:var(--mono); font-size:12px; background:var(--bg3); border:1px solid var(--border); border-radius:3px; padding:1px 6px; color:var(--cyan); }
+
+  /* HERO */
+  .hero { background:linear-gradient(135deg,var(--bg1),var(--bg2)); border:1px solid var(--border2); border-radius:10px; padding:28px 32px; margin-bottom:40px; }
+  .hero h1 { font-size:28px; margin-bottom:6px; }
+  .hero p { color:var(--text); margin:0; font-size:14px; }
+  .hero-tag { display:inline-block; background:var(--greenBg); border:1px solid var(--green2); color:var(--green); font-size:10px; font-family:var(--mono); border-radius:3px; padding:2px 8px; margin-bottom:12px; letter-spacing:1px; }
+
+  /* CARDS */
+  .card { background:var(--bg1); border:1px solid var(--border); border-radius:8px; padding:20px 24px; margin-bottom:14px; }
+  .card-title { font-size:13px; font-weight:600; color:var(--textHi); margin-bottom:8px; display:flex; align-items:center; gap:8px; }
+  .card p { margin-bottom:0; font-size:13px; }
+
+  /* STEP LIST */
+  .steps { display:flex; flex-direction:column; gap:0; }
+  .step { display:flex; gap:16px; padding:18px 0; border-bottom:1px solid var(--border); }
+  .step:last-child { border-bottom:none; }
+  .step-num { width:32px; height:32px; border-radius:50%; background:var(--bg3); border:1px solid var(--border2); display:flex; align-items:center; justify-content:center; font-family:var(--mono); font-size:13px; font-weight:600; color:var(--cyan); flex-shrink:0; margin-top:2px; }
+  .step-body h3 { margin:0 0 6px; font-size:14px; color:var(--textHi); }
+  .step-body p { font-size:13px; margin:0; }
+
+  /* SIGNAL ANATOMY */
+  .signal-box { background:var(--bg2); border:1px solid var(--border2); border-radius:8px; padding:20px; font-family:var(--mono); font-size:12px; margin:16px 0; }
+  .signal-box .field { display:flex; gap:8px; padding:5px 0; border-bottom:1px solid var(--border); }
+  .signal-box .field:last-child { border-bottom:none; }
+  .signal-box .key { color:var(--purple); min-width:160px; flex-shrink:0; }
+  .signal-box .val { color:var(--textHi); font-weight:600; }
+  .signal-box .explain { color:var(--textDim); font-size:11px; margin-left:8px; }
+
+  /* FLOW DIAGRAM */
+  .flow { display:flex; flex-direction:column; gap:0; margin:16px 0; }
+  .flow-item { display:flex; align-items:flex-start; gap:14px; padding:12px 16px; background:var(--bg2); border:1px solid var(--border); border-radius:6px; margin-bottom:4px; }
+  .flow-arrow { text-align:center; color:var(--textDim); font-size:18px; line-height:1; padding:2px 0 2px 24px; }
+  .flow-icon { font-size:18px; flex-shrink:0; margin-top:1px; }
+  .flow-text { font-size:13px; }
+  .flow-text strong { color:var(--textHi); display:block; margin-bottom:2px; font-size:13px; }
+
+  /* BADGES */
+  .badge { display:inline-block; font-size:10px; font-family:var(--mono); border-radius:3px; padding:2px 7px; font-weight:700; letter-spacing:.5px; margin:0 2px; }
+  .badge-green { background:var(--greenBg); color:var(--green); border:1px solid var(--green2); }
+  .badge-red { background:var(--redBg); color:var(--red); border:1px solid #cc3355; }
+  .badge-gold { background:var(--goldBg); color:var(--gold); border:1px solid #664400; }
+  .badge-cyan { background:rgba(0,212,255,.08); color:var(--cyan); border:1px solid #006688; }
+  .badge-purple { background:rgba(170,102,255,.08); color:var(--purple); border:1px solid #553388; }
+
+  /* WARNING / INFO BOXES */
+  .warn { background:rgba(255,204,0,.06); border:1px solid #664400; border-left:3px solid var(--gold); border-radius:6px; padding:14px 18px; margin:14px 0; }
+  .warn .wtitle { color:var(--gold); font-weight:600; font-size:13px; margin-bottom:5px; }
+  .info { background:rgba(0,212,255,.05); border:1px solid #006688; border-left:3px solid var(--cyan); border-radius:6px; padding:14px 18px; margin:14px 0; }
+  .info .ititle { color:var(--cyan); font-weight:600; font-size:13px; margin-bottom:5px; }
+  .danger { background:var(--redBg); border:1px solid #cc3355; border-left:3px solid var(--red); border-radius:6px; padding:14px 18px; margin:14px 0; }
+  .danger .dtitle { color:var(--red); font-weight:600; font-size:13px; margin-bottom:5px; }
+  .success { background:var(--greenBg); border:1px solid var(--green2); border-left:3px solid var(--green); border-radius:6px; padding:14px 18px; margin:14px 0; }
+  .success .stitle { color:var(--green); font-weight:600; font-size:13px; margin-bottom:5px; }
+
+  /* TABLE */
+  table { width:100%; border-collapse:collapse; margin:14px 0; font-size:13px; }
+  th { background:var(--bg3); color:var(--textDim); font-size:10px; letter-spacing:1px; text-transform:uppercase; padding:8px 12px; text-align:left; border-bottom:1px solid var(--border); }
+  td { padding:9px 12px; border-bottom:1px solid var(--border); vertical-align:top; }
+  td:first-child { color:var(--textHi); font-weight:600; white-space:nowrap; }
+  tr:last-child td { border-bottom:none; }
+  tr:hover td { background:rgba(255,255,255,.01); }
+
+  /* CONFIDENCE VISUAL */
+  .conf-demo { background:var(--bg3); border:1px solid var(--border); border-radius:6px; padding:16px; margin:12px 0; }
+  .conf-row { display:flex; align-items:center; gap:12px; margin-bottom:10px; }
+  .conf-row:last-child { margin-bottom:0; }
+  .conf-bar-bg { flex:1; height:8px; background:var(--bg); border-radius:4px; overflow:hidden; }
+  .conf-bar-fill { height:100%; border-radius:4px; }
+  .conf-label { font-size:11px; min-width:100px; color:var(--textDim); }
+  .conf-score { font-family:var(--mono); font-size:12px; font-weight:600; min-width:40px; text-align:right; }
+
+  /* SCROLLBAR */
+  ::-webkit-scrollbar { width:4px; }
+  ::-webkit-scrollbar-thumb { background:var(--border); border-radius:4px; }
+
+  @media(max-width:768px) {
+    .sidebar { display:none; }
+    .content { margin-left:0; padding:24px 20px 60px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<div class="sidebar">
+  <div class="sidebar-logo">
+    <div class="name">AI Trade Terminal</div>
+    <div class="sub">USER GUIDE v2</div>
+  </div>
+  <div class="nav-section">Overview</div>
+  <a class="nav-item active" href="#overview">What Is This System?</a>
+  <a class="nav-item" href="#start">How To Start</a>
+  <div class="nav-section">Signals</div>
+  <a class="nav-item" href="#how-signals">How Signals Are Made</a>
+  <a class="nav-item" href="#confidence">Confidence Score</a>
+  <a class="nav-item" href="#read-signal">Reading A Signal</a>
+  <div class="nav-section">Trading</div>
+  <a class="nav-item" href="#manual">Manual Trading</a>
+  <a class="nav-item" href="#auto">Auto Trading</a>
+  <a class="nav-item" href="#tp-sl">Entry / SL / TP</a>
+  <div class="nav-section">Risk & Safety</div>
+  <a class="nav-item" href="#risk">Risk Management</a>
+  <a class="nav-item" href="#safety">Safety Rules</a>
+  <a class="nav-item" href="#emergency">Emergency Stop</a>
+  <div class="nav-section">Dashboard</div>
+  <a class="nav-item" href="#dashboard">Dashboard Walkthrough</a>
+  <a class="nav-item" href="#faq">FAQ</a>
+</div>
+
+<!-- MAIN CONTENT -->
+<div class="content">
+
+  <!-- HERO -->
+  <div class="hero">
+    <div class="hero-tag">COMPLETE USER GUIDE</div>
+    <h1>How To Use AI Trade Terminal</h1>
+    <p>This guide explains everything — how signals are created, how to read them, how to trade manually or automatically, and how the safety system protects your account.</p>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════ -->
+  <h2 id="overview"><span class="icon">🧠</span> What Is This System?</h2>
+
+  <p>This is an <strong>AI-powered crypto trading assistant</strong>. It watches the market 24/7, analyzes price patterns using professional trading methods, and tells you — or acts automatically — when a good trade setup appears.</p>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin:20px 0;">
+    <div class="card">
+      <div class="card-title">📊 Market Analysis</div>
+      <p>Fetches real price data from Binance every few seconds and runs technical indicators</p>
+    </div>
+    <div class="card">
+      <div class="card-title">🤖 Claude AI Brain</div>
+      <p>Anthropic's Claude AI reads all the data and decides if there's a valid trade setup</p>
+    </div>
+    <div class="card">
+      <div class="card-title">🛡️ Risk Guard</div>
+      <p>Automatic position sizing, stop losses, and daily loss limits protect your account</p>
+    </div>
+  </div>
+
+  <div class="info">
+    <div class="ititle">Think of it like this</div>
+    The system works like having a professional trader watching charts 24/7. It spots setups, calculates the risk, tells you exactly where to enter, where to put your stop loss, and where to take profit — then either tells you or executes it for you.
+  </div>
+
+  <!-- ══════════════════════════════════════════════════ -->
+  <h2 id="start"><span class="icon">🚀</span> How To Start</h2>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <h3>Start the Python backend</h3>
+        <p>Open a terminal in your project folder and run: <code>python main.py</code><br/>
+        You should see: <code>Listening: http://127.0.0.1:8000</code></p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <h3>Open the dashboard</h3>
+        <p>Double-click <code>trading_dashboard.html</code> in your file browser. The status pills in the top-right corner should turn green within a few seconds.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <h3>Check your balance</h3>
+        <p>The header shows your live WEEX balance. If it shows your real USDT amount, the connection is working.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">4</div>
+      <div class="step-body">
+        <h3>Pick a market and click ANALYZE</h3>
+        <p>Select BTC/USDT (or any pair) from the left panel, then click the blue <strong>🤖 ANALYZE</strong> button. Claude will analyze the market and return a signal in 5–15 seconds.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════ -->
+  <h2 id="how-signals"><span class="icon">⚙️</span> How Signals Are Made</h2>
+
+  <p>Every signal goes through <strong>6 layers of analysis</strong> before Claude makes a decision:</p>
+
+  <div class="flow">
+
+    <div class="flow-item">
+      <div class="flow-icon">📥</div>
+      <div class="flow-text">
+        <strong>Step 1 — Fetch Live Market Data</strong>
+        The system downloads the last 250 hourly candles (price bars) for your chosen pair from Binance. This gives Claude real, accurate price history to work with.
+      </div>
+    </div>
+    <div class="flow-arrow">↓</div>
+
+    <div class="flow-item">
+      <div class="flow-icon">📐</div>
+      <div class="flow-text">
+        <strong>Step 2 — Calculate All Indicators</strong>
+        It automatically computes: EMA 20/50/200 (trend direction), RSI (overbought/oversold), MACD (momentum), ATR (volatility), Bollinger Bands (price range), and Volume SMA (is volume normal or spiking?).
+      </div>
+    </div>
+    <div class="flow-arrow">↓</div>
+
+    <div class="flow-item">
+      <div class="flow-icon">⏱️</div>
+      <div class="flow-text">
+        <strong>Step 3 — Multi-Timeframe Check (15m / 1h / 4h)</strong>
+        The system checks if the market is trending up or down on <em>three different timeframes</em>. If at least 2 out of 3 agree (e.g. 1h and 4h both look bullish), the signal gets stronger. If they disagree, the system says WAIT.
+      </div>
+    </div>
+    <div class="flow-arrow">↓</div>
+
+    <div class="flow-item">
+      <div class="flow-icon">😨</div>
+      <div class="flow-text">
+        <strong>Step 4 — Fear &amp; Greed Index</strong>
+        The system fetches the live Crypto Fear &amp; Greed Index (0–100). <span class="badge badge-red">Extreme Fear &lt;25</span> = markets are panicking, look for LONG opportunities. <span class="badge badge-green">Extreme Greed &gt;75</span> = markets are overconfident, be cautious on longs.
+      </div>
+    </div>
+    <div class="flow-arrow">↓</div>
+
+    <div class="flow-item">
+      <div class="flow-icon">🏦</div>
+      <div class="flow-text">
+        <strong>Step 5 — Smart Money Concepts (SMC)</strong>
+        This is institutional trading logic. The system finds: <strong>Order Blocks</strong> (where big banks placed orders), <strong>Fair Value Gaps</strong> (price gaps institutions want to fill), and <strong>Liquidity Levels</strong> (where stop losses are clustered — banks hunt these). These are the exact zones where high-probability trades happen.
+      </div>
+    </div>
+    <div class="flow-arrow">↓</div>
+
+    <div class="flow-item">
+      <div class="flow-icon">🤖</div>
+      <div class="flow-text">
+        <strong>Step 6 — Claude AI Makes The Decision</strong>
+        All the data above is sent to Claude AI in one detailed prompt. Claude analyzes everything together — like an expert trader reading the full picture — and returns a structured JSON signal with action, prices, and reasoning.
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ══════════════════════════════════════════════════ -->
+  <h2 id="confidence"><span class="icon">🎯</span> The Confidence Score</h2>
+
+  <p>Every signal has a <strong>Confidence Score (0–100%)</strong>. This is calculated automatically <em>before</em> Claude even sees the data, based on how many factors align. The system will only trade if confidence ≥ <code>68%</code>.</p>
+
+  <div class="conf-demo">
+    <div style="font-size:11px;color:var(--textDim);letter-spacing:1px;margin-bottom:12px;">HOW CONFIDENCE IS BUILT</div>
+
+    <div class="conf-row">
+      <div class="conf-label" style="color:var(--green);">All 3 TF agree</div>
+      <div class="conf-bar-bg"><div class="conf-bar-fill" style="width:75%;background:var(--green)"></div></div>
+      <div class="conf-score" style="color:var(--green)">+15</div>
+    </div>
+    <div class="conf-row">
+      <div class="conf-label" style="color:var(--green);">Volume spike</div>
+      <div class="conf-bar-bg"><div class="conf-bar-fill" style="width:50%;background:var(--green)"></div></div>
+      <div class="conf-score" style="color:var(--green)">+10</div>
+    </div>
+    <div class="conf-row">
+      <div class="conf-label" style="color:var(--green);">Extreme F&amp;G contrarian</div>
+      <div class="conf-bar-bg"><div class="conf-bar-fill" style="width:50%;background:var(--green)"></div></div>
+      <div class="conf-score" style="color:var(--green)">+10</div>
+    </div>
+    <div class="conf-row">
+      <div class="conf-label" style="color:var(--green);">RSI in good zone</div>
+      <div class="conf-bar-bg"><div class="conf-bar-fill" style="width:40%;background:var(--green)"></div></div>
+      <div class="conf-score" style="color:var(--green)">+8</div>
+    </div>
+    <div class="conf-row">
+      <div class="conf-label" style="color:var(--green);">Price in FVG zone</div>
+      <div class="conf-bar-bg"><div class="conf-bar-fill" style="width:35%;background:var(--green)"></div></div>
+      <div class="conf-score" style="color:var(--green)">+7</div>
+    </div>
+    <div class="conf-row">
+      <div class="conf-label" style="color:var(--green);">Near Order Block</div>
+      <div class="conf-bar-bg"><div class="conf-bar-fill" style="width:25%;background:var(--green)"></div></div>
+      <div class="conf-score" style="color:var(--green)">+5</div>
+    </div>
+    <div style="height:1px;background:var(--border);margin:8px 0;"></div>
+    <div class="conf-row">
+      <div class="conf-label" style="color:var(--red);">TFs disagree</div>
+      <div class="conf-bar-bg"><div class="conf-bar-fill" style="width:75%;background:var(--red)"></div></div>
+      <div class="conf-score" style="color:var(--red)">−15</div>
+    </div>
+    <div class="conf-row">
+      <div class="conf-label" style="color:var(--red);">Against 200 EMA</div>
+      <div class="conf-bar-bg"><div class="conf-bar-fill" style="width:50%;background:var(--red)"></div></div>
+      <div class="conf-score" style="color:var(--red)">−10</div>
+    </div>
+    <div class="conf-row">
+      <div class="conf-label" style="color:var(--red);">Low volume</div>
+      <div class="conf-bar-bg"><div class="conf-bar-fill" style="width:40%;background:var(--red)"></div></div>
+      <div class="conf-score" style="color:var(--red)">−8</div>
+    </div>
+  </div>
+
+  <table>
+    <tr><th>Score</th><th>Meaning</th><th>Action</th></tr>
+    <tr><td><span class="badge badge-red">0–64%</span></td><td>Too many conflicting signals — not worth the risk</td><td>System outputs <strong>WAIT</strong>, no trade taken</td></tr>
+    <tr><td><span class="badge badge-gold">65–74%</span></td><td>Decent setup, some confluence</td><td>Trade with base risk (1x sizing)</td></tr>
+    <tr><td><span class="badge badge-green">75–84%</span></td><td>Strong setup, most factors align</td><td>Trade with base risk</td></tr>
+    <tr><td><span class="badge badge-green">85–100%</span></td><td>Exceptional setup, rare — nearly everything aligns</td><td>Trade with up to 2x base risk (Kelly)</td></tr>
+  </table>
+
+  <!-- ══════════════════════════════════════════════════ -->
+  <h2 id="read-signal"><span class="icon">📋</span> Reading A Signal</h2>
+
+  <p>When a signal appears in the bottom panel of the dashboard, here's what every field means:</p>
+
+  <div class="signal-box">
+    <div class="field">
+      <span class="key">"action"</span>
+      <span class="val">LONG</span>
+      <span class="explain">← BUY (price going up) | SHORT = SELL | WAIT = do nothing</span>
+    </div>
+    <div class="field">
+      <span class="key">"confidence"</span>
+      <span class="val">78</span>
+      <span class="explain">← 78% confident. Min 68% to trade. Above 85% = strong signal</span>
+    </div>
+    <div class="field">
+      <span class="key">"entry"</span>
+      <span class="val">75850.00</span>
+      <span class="explain">← Enter the trade at this price</span>
+    </div>
+    <div class="field">
+      <span class="key">"sl"</span>
+      <span class="val">75350.00</span>
+      <span class="explain">← Stop Loss. If price hits this, exit immediately. This is your max loss.</span>
+    </div>
+    <div class="field">
+      <span class="key">"tp1"</span>
+      <span class="val">76500.00</span>
+      <span class="explain">← Take Profit 1. Close 50% of position here. Low risk target.</span>
+    </div>
+    <div class="field">
+      <span class="key">"tp2"</span>
+      <span class="val">77000.00</span>
+      <span class="explain">← Take Profit 2. Close 30% of position here. Medium target.</span>
+    </div>
+    <div class="field">
+      <span class="key">"tp3"</span>
+      <span class="val">77800.00</span>
+      <span class="explain">← Take Profit 3. Leave 20% running as "runner". Big target.</span>
+    </div>
+    <div class="field">
+      <span class="key">"rr"</span>
+      <span class="val">1:2.5</span>
+      <span class="explain">← Risk:Reward. For every $1 you risk, you can make $2.50. Min is 1:2.</span>
+    </div>
+    <div class="field">
+      <span class="key">"timeframe_bias"</span>
+      <span class="val">BULLISH</span>
+      <span class="explain">← 15m, 1h, 4h all agree the market is going up</span>
+    </div>
+    <div class="field">
+      <span class="key">"sentiment"</span>
+      <span class="val">Fear</span>
+      <span class="explain">← Market is fearful = good time to look for longs (contrarian)</span>
+    </div>
+    <div class="field">
+      <span class="key">"volume_signal"</span>
+      <span class="val">HIGH</span>
+      <span class="explain">← Volume is above average = real institutional movement, not a fake</span>
+    </div>
+    <div class="field">
+      <span class="key">"setup_type"</span>
+      <span class="val">Bullish OB + FVG Fill</span>
+      <span class="explain">← The SMC pattern Claude identified (see glossary below)</span>
+    </div>
+    <div class="field">
+      <span class="key">"key_level"</span>
+      <span class="val">75200.00</span>
+      <span class="explain">← The most important price level to watch</span>
+    </div>
+    <div class="field">
+      <span class="key">"invalidation"</span>
+      <span class="val">74900.00</span>
+      <span class="explain">← If price closes BELOW this, the trade idea is wrong. Exit immediately.</span>
+    </div>
+    <div class="field">
+      <span class="key">"reason"</span>
+      <span class="val">"Price swept SSL at 75200..."</span>
+      <span class="explain">← Claude's 3-sentence explanation of WHY it sees this setup</span>
+    </div>
+  </div>
+
+  <h3>SMC Setup Types — Plain English</h3>
+  <table>
+    <tr><th>Setup Name</th><th>What It Means</th></tr>
+    <tr><td>Bullish OB + FVG Fill</td><td>Price has returned to a zone where big institutions previously bought, and there's an unfilled price gap that needs to be filled upward</td></tr>
+    <tr><td>Liquidity Sweep + MSB</td><td>Price dipped below a key low (grabbing stop losses from retail traders), then reversed — big institutions triggered the stops and are now pushing price up</td></tr>
+    <tr><td>BOS + Retest</td><td>Break of Structure — price broke above a previous high, pulled back to retest it, and is likely to continue higher</td></tr>
+    <tr><td>CHoCH (Change of Character)</td><td>Market was bearish, then suddenly broke structure to the upside — potential trend reversal</td></tr>
+    <tr><td>Bearish OB Rejection</td><td>Price hit a zone where institutions previously sold — likely to push back down from here</td></tr>
+    <tr><td>No Confluence — WAIT</td><td>Nothing lines up cleanly. Staying out is the right call.</td></tr>
+  </table>
+
+  <!-- ══════════════════════════════════════════════════ -->
+  <h2 id="manual"><span class="icon">🖱️</span> Manual Trading (Signals Only)</h2>
+
+  <p>In <strong>Manual Mode</strong> (AUTO_TRADE=false), the system gives you signals but <em>you</em> decide whether to act on them.</p>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <h3>Get a signal</h3>
+        <p>Click <strong>🤖 ANALYZE</strong> on a pair, or click <strong>⚡ SCAN ALL</strong> to scan all 4 pairs at once. Wait for the signal to appear in the bottom panel.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <h3>Check the action and confidence</h3>
+        <p>Only consider acting if: Action = <span class="badge badge-green">LONG</span> or <span class="badge badge-red">SHORT</span> AND confidence ≥ 68%. If it says <span class="badge badge-gold">WAIT</span>, do nothing.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <h3>Read the entry, SL, and TPs</h3>
+        <p>Note the <strong>Entry</strong> price, <strong>SL</strong> (Stop Loss), and three TP levels. These are calculated using ATR (market volatility), so they are realistic for current conditions.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">4</div>
+      <div class="step-body">
+        <h3>Go to WEEX and place the trade</h3>
+        <p>Open your WEEX app. Set a <strong>Limit Order</strong> at the entry price. Place your stop loss order immediately. Set TP1 as your first take profit target.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">5</div>
+      <div class="step-body">
+        <h3>Manage the trade</h3>
+        <p>When TP1 hits → move your stop loss to breakeven (entry price). When TP2 hits → move stop loss to TP1 (you're now guaranteed profit). Let the remaining 20% run to TP3.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="warn">
+    <div class="wtitle">⚠ Golden Rule</div>
+    Never move your stop loss further away from your entry to "give the trade more room." Only move it to lock in profits (toward TP). A stop loss exists to protect your capital — never widen it.
+  </div>
+
+  <!-- ══════════════════════════════════════════════════ -->
+  <h2 id="auto"><span class="icon">🤖</span> Auto Trading Mode</h2>
+
+  <p>When <strong>AUTO_TRADE=true</strong>, the bot handles everything automatically:</p>
+
+  <div class="flow">
+    <div class="flow-item">
+      <div class="flow-icon">🔍</div>
+      <div class="flow-text"><strong>Signal Generated</strong> Every time you click ANALYZE or SCAN ALL, if a valid signal appears (confidence ≥ 68%)</div>
+    </div>
+    <div class="flow-arrow">↓</div>
+    <div class="flow-item">
+      <div class="flow-icon">🛡️</div>
+      <div class="flow-text"><strong>Risk Check Passes</strong> Risk manager confirms: daily loss limit not hit, max trades not exceeded, no correlation conflicts, bot not paused</div>
+    </div>
+    <div class="flow-arrow">↓</div>
+    <div class="flow-item">
+      <div class="flow-icon">📏</div>
+      <div class="flow-text"><strong>Position Size Calculated</strong> Kelly-influenced sizing — high confidence (≥85%) uses 2x base risk, normal uses 1x. Never exceeds MAX_TRADE_USDT.</div>
+    </div>
+    <div class="flow-arrow">↓</div>
+    <div class="flow-item">
+      <div class="flow-icon">📤</div>
+      <div class="flow-text"><strong>Limit Entry Order Placed</strong> A limit order is placed at the entry price (slightly offset for fast fill). NOT a market order — saves on slippage.</div>
+    </div>
+    <div class="flow-arrow">↓</div>
+    <div class="flow-item">
+      <div class="flow-icon">🔒</div>
+      <div class="flow-text"><strong>SL + TP Orders Placed</strong> Immediately after entry: Stop Loss order placed, TP1 (50% size) and TP2 (30% size) limit orders placed. 20% left as runner.</div>
+    </div>
+    <div class="flow-arrow">↓</div>
+    <div class="flow-item">
+      <div class="flow-icon">👁️</div>
+      <div class="flow-text"><strong>Monitored Every 60 Seconds</strong> When TP1 hits → SL moved to breakeven. When TP2 hits → SL moved to TP1. Everything logged to trades.log</div>
+    </div>
+  </div>
+
+  <div class="info">
+    <div class="ititle">How to toggle Auto Trade</div>
+    Use the <strong>MANUAL / AUTO toggle switch</strong> in the top header of the dashboard. When it turns green with "AUTO" text, the bot is live. You can also change <code>AUTO_TRADE=true/false</code> in your .env file and restart the server.
+  </div>
+
+  <!-- ══════════════════════════════════════════════════ -->
+  <h2 id="tp-sl"><span class="icon">📍</span> Entry, Stop Loss & Take Profit Explained</h2>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:16px 0;">
+    <div class="card" style="border-left:3px solid var(--cyan);">
+      <div class="card-title" style="color:var(--cyan);">📥 Entry Price</div>
+      <p>The price you open your position at. The system uses a <strong>limit order</strong> slightly below current price for LONG (or above for SHORT) to get a better fill than market price.</p>
+    </div>
+    <div class="card" style="border-left:3px solid var(--red);">
+      <div class="card-title" style="color:var(--red);">🛑 Stop Loss (SL)</div>
+      <p>If price moves against you and hits this level, the trade closes automatically. This is set using <strong>1.5× ATR</strong> from entry — wide enough to avoid normal market noise, tight enough to limit loss.</p>
+    </div>
+    <div class="card" style="border-left:3px solid var(--green);">
+      <div class="card-title" style="color:var(--green);">🎯 TP1 — 50% of position</div>
+      <p>First profit target. When hit, close half the position and move SL to breakeven. This locks in safety — you can't lose money even if the rest goes wrong.</p>
+    </div>
+    <div class="card" style="border-left:3px solid var(--green2);">
+      <div class="card-title" style="color:var(--green2);">🎯 TP2 — 30% of position</div>
+      <p>Second profit target. When hit, close 30% more and move SL to TP1. You're now guaranteed profit on the whole trade no matter what.</p>
+    </div>
+    <div class="card" style="border-left:3px solid #00aa55; grid-column:span 2;">
+      <div class="card-title" style="color:#00aa55;">🚀 TP3 — 20% runner</div>
+      <p>Leave the last 20% running with a trailing stop. This is your "lottery ticket" — if the market makes a big move, this portion captures the full run. If not, your trailing stop protects profits from TP1 and TP2.</p>
+    </div>
+  </div>
+
+  <h3>Example Trade — $110 Account</h3>
+  <table>
+    <tr><th>Item</th><th>Value</th><th>Explanation</th></tr>
+    <tr><td>Account Balance</td><td>$110 USDT</td><td>Your real balance</td></tr>
+    <tr><td>Risk Per Trade</td><td>1.5% = $1.65</td><td>Max you can lose on this trade</td></tr>
+    <tr><td>Entry</td><td>$75,850</td><td>Buy BTC here</td></tr>
+    <tr><td>Stop Loss</td><td>$75,350</td><td>$500 below entry</td></tr>
+    <tr><td>SL Distance %</td><td>0.66%</td><td>How far SL is from entry</td></tr>
+    <tr><td>Position Size</td><td>$1.65 ÷ 0.66% = $250</td><td>Total position value</td></tr>
+    <tr><td>BTC Quantity</td><td>0.0033 BTC</td><td>$250 ÷ $75,850</td></tr>
+    <tr><td>TP1 at $76,500</td><td>+$2.14 (50% closed)</td><td>Profit on first exit</td></tr>
+    <tr><td>TP2 at $77,000</td><td>+$2.47 (30% closed)</td><td>Profit on second exit</td></tr>
+    <tr><td>Max Loss</td><td>−$1.65</td><td>Only if SL hits before TP1</td></tr>
+  </table>
+
+  <!-- ══════════════════════════════════════════════════ -->
+  <h2 id="risk"><span class="icon">🛡️</span> Risk Management System</h2>
+
+  <p>The risk manager runs <em>before every trade</em> and blocks execution if any rule is violated.</p>
+
+  <h3>Automatic Protections</h3>
+  <table>
+    <tr><th>Protection</th><th>Trigger</th><th>What Happens</th></tr>
+    <tr><td>Confidence Gate</td><td>Signal confidence &lt; 68%</td><td>Trade blocked. WAIT is returned.</td></tr>
+    <tr><td>Daily Loss Limit</td><td>Losses exceed $250/day</td><td>All trading blocked until midnight UTC</td></tr>
+    <tr><td>Max Concurrent Trades</td><td>3 trades already open</td><td>New trades blocked until one closes</td></tr>
+    <tr><td>5% Drawdown Alert</td><td>Balance drops 5% from peak</td><td>Position sizes halved automatically</td></tr>
+    <tr><td>10% Drawdown Kill</td><td>Balance drops 10% from peak</td><td>ALL new trading stopped, dashboard alerted</td></tr>
+    <tr><td>Consecutive Loss Pause</td><td>3 losses in a row</td><td>Bot paused for 2 hours automatically</td></tr>
+    <tr><td>Big Single Loss Pause</td><td>One loss &gt; 3% of account</td><td>Bot paused for 1 hour</td></tr>
+    <tr><td>Correlation Filter</td><td>BTC + ETH positions exceed 2</td><td>New BTC/ETH trade blocked</td></tr>
+    <tr><td>R:R Minimum</td><td>Risk:Reward below 1:2</td><td>Trade blocked regardless of confidence</td></tr>
+  </table>
+
+  <h3>Kelly Position Sizing</h3>
+  <p>The system adjusts trade size based on confidence:</p>
+  <div class="conf-demo">
+    <div class="conf-row">
+      <div class="conf-label">Confidence 65–79%</div>
+      <div class="conf-bar-bg"><div class="conf-bar-fill" style="width:50%;background:var(--gold)"></div></div>
+      <div class="conf-score" style="color:var(--gold);">1.0× risk</div>
+    </div>
+    <div class="conf-row">
+      <div class="conf-label">Confidence 80–100%</div>
+      <div class="conf-bar-bg"><div class="conf-bar-fill" style="width:100%;background:var(--green)"></div></div>
+      <div class="conf-score" style="color:var(--green);">2.0× risk</div>
+    </div>
+    <div class="conf-row">
+      <div class="conf-label">5% drawdown active</div>
+      <div class="conf-bar-bg"><div class="conf-bar-fill" style="width:25%;background:var(--red)"></div></div>
+      <div class="conf-score" style="color:var(--red);">0.5× risk</div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════ -->
+  <h2 id="safety"><span class="icon">⚠️</span> Safety Rules — Never Break These</h2>
+
+  <div class="danger">
+    <div class="dtitle">🔴 CRITICAL — Read Before Going Live</div>
+    <p style="font-size:13px;margin-top:4px;">These rules are hardcoded into the system. Never override them manually.</p>
+  </div>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-num" style="background:var(--redBg);border-color:var(--red2);color:var(--red);">!</div>
+      <div class="step-body">
+        <h3>Stop Loss is MANDATORY</h3>
+        <p>A stop loss order is placed immediately after every entry. The system will never hold a position without a stop loss. No exceptions.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num" style="background:var(--redBg);border-color:var(--red2);color:var(--red);">!</div>
+      <div class="step-body">
+        <h3>Never risk more than MAX_TRADE_USDT</h3>
+        <p>Currently set to $150 in your .env. With a $110 account this should be reduced to $10–$15. Update it to match your balance.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num" style="background:var(--redBg);border-color:var(--red2);color:var(--red);">!</div>
+      <div class="step-body">
+        <h3>Every action is logged</h3>
+        <p>Every signal, attempt, success, and failure is written to <code>trades.log</code>. Review this file regularly to understand what the bot is doing.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num" style="background:var(--redBg);border-color:var(--red2);color:var(--red);">!</div>
+      <div class="step-body">
+        <h3>WEEX API errors never crash the bot</h3>
+        <p>If any order fails on WEEX, the error is logged and skipped — the bot continues running safely. It never retries an order blindly.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="warn">
+    <div class="wtitle">⚠ Recommended Settings for Your $110 Account</div>
+    <p style="font-size:13px;">Update your <code>.env</code> file with these values and restart the server:</p>
+    <pre style="background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:12px;margin-top:8px;font-family:var(--mono);font-size:12px;color:var(--textHi);">
+ACCOUNT_USDT=110
+MAX_TRADE_USDT=10
+DAILY_LOSS_LIMIT_USDT=20
+RISK_PCT=1.5
+MIN_CONFIDENCE=70</pre>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════ -->
+  <h2 id="emergency"><span class="icon">🚨</span> Emergency Stop</h2>
+
+  <p>The big red <strong>🚨 EMERGENCY STOP</strong> button is always visible in the top-right of the dashboard. Click it at any time to instantly close ALL open positions.</p>
+
+  <div class="success">
+    <div class="stitle">✓ Emergency Stop Always Works</div>
+    <p style="font-size:13px;">Even if the bot is paused, even if auto-trade is off, even if something else is broken — the emergency stop button always executes immediately. It requires a confirmation dialog to prevent accidental clicks.</p>
+  </div>
+
+  <p>You can also trigger it via the API directly:</p>
+  <code>POST http://127.0.0.1:8000/emergency/stop</code>
+
+  <!-- ══════════════════════════════════════════════════ -->
+  <h2 id="dashboard"><span class="icon">🖥️</span> Dashboard Walkthrough</h2>
+
+  <table>
+    <tr><th>Area</th><th>What It Shows</th></tr>
+    <tr><td>Header — Balance</td><td>Live WEEX balance: Total / Free / Unrealised PnL / Daily PnL. Updates every 30 seconds.</td></tr>
+    <tr><td>Header — Fear &amp; Greed</td><td>Current F&G index (0–100). Red = fear, green = greed. Updates every 5 minutes.</td></tr>
+    <tr><td>Header — MANUAL/AUTO toggle</td><td>Flip between signal-only mode and fully automated trading</td></tr>
+    <tr><td>Header — Status pills</td><td>Green = connected. Grey = offline. Shows Python backend + WEEX status.</td></tr>
+    <tr><td>Left panel — Markets</td><td>Live prices for all pairs. Click any to load its chart. Shows last signal badge.</td></tr>
+    <tr><td>Center — Chart</td><td>Live TradingView chart for selected pair. Updates in real time.</td></tr>
+    <tr><td>Center — Chart header</td><td>TF Bias badge (BULLISH/BEARISH/MIXED) + Volume badge (HIGH/NORMAL/LOW)</td></tr>
+    <tr><td>Bottom — Signal panel</td><td>Full AI signal: action, confidence bar, all prices, Claude's reasoning</td></tr>
+    <tr><td>Right → SIGNALS tab</td><td>History of all signals generated this session</td></tr>
+    <tr><td>Right → POSITIONS tab</td><td>All currently open positions with live PnL, SL status, close button</td></tr>
+    <tr><td>Right → STATS tab</td><td>Today's trades, win rate, best/worst trade, drawdown meter, loss limit bar</td></tr>
+    <tr><td>Right → CONNECT tab</td><td>Backend URL, connection status, paper/live mode indicator</td></tr>
+    <tr><td>Right → RISK tab</td><td>Adjust risk settings and sync them to the backend live</td></tr>
+  </table>
+
+  <!-- ══════════════════════════════════════════════════ -->
+  <h2 id="faq"><span class="icon">❓</span> Frequently Asked Questions</h2>
+
+  <h3>Why does Claude say WAIT most of the time?</h3>
+  <p>This is correct and expected. A professional trader only takes 2–5 high-quality setups per day, not every candle. WAIT means "the market conditions don't give a clear edge right now." Forcing trades in a WAIT market is how accounts get blown.</p>
+
+  <h3>What does "Mixed TF Bias" mean?</h3>
+  <p>It means the 15m, 1h, and 4h timeframes don't all agree on direction. For example, 15m says bearish, 1h says bullish, 4h says neutral. Without agreement, there's no clean trade — this is a WAIT scenario.</p>
+
+  <h3>Can I change the pairs it scans?</h3>
+  <p>Yes. Edit the <code>SYMBOLS</code> line in your <code>.env</code> file: <code>SYMBOLS=BTC/USDT,ETH/USDT,SOL/USDT</code> and restart the server.</p>
+
+  <h3>How do I know if a trade was actually placed on WEEX?</h3>
+  <p>Check <code>trades.log</code> in your project folder — every action is logged. You can also go to WEEX app → Orders → Open Orders to see live orders.</p>
+
+  <h3>The bot paused itself — what happened?</h3>
+  <p>Either 3 consecutive losses occurred (2-hour pause) or a single loss exceeded 3% of your account (1-hour pause). Check the STATS tab in the dashboard — it shows the pause reason and how many minutes remain.</p>
+
+  <h3>What is Fear &amp; Greed and why does it matter?</h3>
+  <p>It's a daily market sentiment score (0=extreme fear, 100=extreme greed). When markets are in extreme fear, retail traders are panic selling — which is often when smart money buys. When markets are extremely greedy, everyone is overleveraged — which is when corrections happen. The system uses this as a contrarian signal.</p>
+
+  <h3>Is this a guaranteed profit system?</h3>
+  <p><strong>No.</strong> No trading system guarantees profits. This system uses professional analysis methods to find high-probability setups, but all trades carry risk. The risk management system is designed to ensure losses stay small and manageable. Always trade with money you can afford to lose.</p>
+
+  <div class="success" style="margin-top:40px;">
+    <div class="stitle">✓ You're Ready</div>
+    <p style="font-size:13px;">Start with: <code>python main.py</code> → open <code>trading_dashboard.html</code> → select BTC/USDT → click <strong>🤖 ANALYZE</strong> → read the signal → decide or let the bot trade. Check your STATS tab daily.</p>
+  </div>
+
+  <div style="margin-top:60px;padding-top:20px;border-top:1px solid var(--border);font-size:11px;color:var(--textDim);">
+    AI Trade Terminal v2 — User Guide &nbsp;·&nbsp; Keep PAPER_TRADING=false only after you understand the system &nbsp;·&nbsp; Always use a stop loss
+  </div>
+
+</div>
+
+<script>
+// Highlight active nav item on scroll
+const sections = document.querySelectorAll('h2[id]');
+const navItems = document.querySelectorAll('.nav-item');
+window.addEventListener('scroll',()=>{
+  let cur='';
+  sections.forEach(s=>{ if(window.scrollY>=s.offsetTop-80) cur=s.id; });
+  navItems.forEach(n=>{ n.classList.toggle('active', n.getAttribute('href')==='#'+cur); });
+});
+</script>
+</body>
+</html>

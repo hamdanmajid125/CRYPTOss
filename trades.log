@@ -1,0 +1,6 @@
+# Trade Log
+# Format: timestamp, symbol, action, entry, sl, tp, confidence, result
+2026-04-19 04:37:04 | ATTEMPT | BTC/USDT | WAIT | conf:32 | Signal is WAIT
+2026-04-19 04:37:15 | ATTEMPT | ETH/USDT | SHORT | conf:67 | Confidence 67% below minimum 68%
+2026-04-19 04:37:24 | ATTEMPT | SOL/USDT | SHORT | conf:67 | Confidence 67% below minimum 68%
+2026-04-19 04:37:35 | ATTEMPT | BNB/USDT | WAIT | conf:32 | Signal is WAIT
