@@ -18,7 +18,9 @@
       "Bash(python main.py)",
       "Bash(curl -s http://127.0.0.1:8000/health)",
       "Bash(python -c \"import subprocess; subprocess.run\\(['taskkill', '/F', '/PID', '5884'], capture_output=True\\)\")",
-      "Bash(curl -s http://127.0.0.1:8000/balance)"
+      "Bash(curl -s http://127.0.0.1:8000/balance)",
+      "Skill(claude-api)",
+      "Skill(claude-api:*)"
     ]
   }
 }

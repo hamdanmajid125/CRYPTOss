@@ -4,3 +4,11 @@
 2026-04-19 04:37:15 | ATTEMPT | ETH/USDT | SHORT | conf:67 | Confidence 67% below minimum 68%
 2026-04-19 04:37:24 | ATTEMPT | SOL/USDT | SHORT | conf:67 | Confidence 67% below minimum 68%
 2026-04-19 04:37:35 | ATTEMPT | BNB/USDT | WAIT | conf:32 | Signal is WAIT
+2026-04-19 13:21:04 | ATTEMPT | BTC/USDT | WAIT | conf:48 | Signal is WAIT
+2026-04-19 13:21:13 | ATTEMPT | ETH/USDT | WAIT | conf:37 | Signal is WAIT
+2026-04-19 13:21:24 | ATTEMPT | SOL/USDT | WAIT | conf:52 | Signal is WAIT
+2026-04-19 13:21:33 | ATTEMPT | BNB/USDT | SHORT | conf:68 | OK
+2026-04-19 13:21:44 | ATTEMPT | BTC/USDT | WAIT | conf:48 | Signal is WAIT
+2026-04-19 13:21:54 | ATTEMPT | ETH/USDT | WAIT | conf:37 | Signal is WAIT
+2026-04-19 13:22:03 | ATTEMPT | SOL/USDT | SHORT | conf:68 | OK
+2026-04-19 13:22:15 | ATTEMPT | BNB/USDT | WAIT | conf:48 | Signal is WAIT
