@@ -20,7 +20,9 @@
       "Bash(python -c \"import subprocess; subprocess.run\\(['taskkill', '/F', '/PID', '5884'], capture_output=True\\)\")",
       "Bash(curl -s http://127.0.0.1:8000/balance)",
       "Skill(claude-api)",
-      "Skill(claude-api:*)"
+      "Skill(claude-api:*)",
+      "Bash(python -c \"import pandas_ta; print\\('pandas_ta OK:', pandas_ta.__version__\\)\")",
+      "Bash(python -c \"import pandas_ta_classic; print\\('pandas_ta_classic OK'\\)\")"
     ]
   }
 }

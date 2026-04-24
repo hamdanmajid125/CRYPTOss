@@ -101,14 +101,17 @@ class ClaudeAgent:
     # THE BEST TRADING PROMPT  (completely rewritten)
     # ─────────────────────────────────────────────────────────────────────────
     def build_prompt(self, data: dict) -> str:
-        liq     = data['liquidity']
-        obs     = data['order_blocks']
-        fvgs    = data['fvgs']
-        tf_bias = data['timeframe_bias']
-        fng     = data['fear_greed']
-        price   = data['price']
-        atr     = data['atr']
-        per_tf  = tf_bias.get('per_tf', {})
+        liq       = data['liquidity']
+        obs       = data['order_blocks']
+        fvgs      = data['fvgs']
+        tf_bias   = data['timeframe_bias']
+        fng       = data['fear_greed']
+        price     = data['price']
+        atr       = data['atr']
+        per_tf    = tf_bias.get('per_tf', {})
+        bos_choch    = data.get('bos_choch', {'type': 'NONE', 'level': 0, 'confirmed': False})
+        regime       = data.get('regime', 'RANGING')
+        funding_rate = data.get('funding_rate', {'rate': 0.0, 'label': 'Neutral', 'bias': 'NEUTRAL'})
 
         pre_score      = self._score_confidence(data, tf_bias, fng)
         candle_pattern = data.get('candle_pattern', 'No pattern detected')
@@ -216,6 +219,14 @@ CANDLESTICK RULES:
 → No pattern = rely entirely on SMC + TF confluence
 
 ━━━ STEP 6: SMART MONEY CONCEPTS (SMC) ━━━
+Market Regime  : {regime}
+  → TRENDING_BULL/BEAR = ride momentum  |  RANGING = wait for OB/FVG touch  |  HIGH_VOLATILITY = reduce size
+
+BOS / CHoCH    : {bos_choch['type']} @ {bos_choch['level']} ({'CONFIRMED ✅' if bos_choch['confirmed'] else 'UNCONFIRMED ⚠️'})
+  → CHoCH = structure flip, strongest reversal signal — HIGH confidence if confirmed
+  → BOS   = continuation of existing trend — trade in direction of break
+  → NONE  = no structure break detected, avoid breakout entries
+
 Buy-Side Liquidity  (BSL — stops above highs)  : {', '.join(str(round(p, 4)) for p in liq['bsl'])}
 Sell-Side Liquidity (SSL — stops below lows)   : {', '.join(str(round(p, 4)) for p in liq['ssl'])}
 
@@ -253,6 +264,11 @@ TAKE PROFIT RULES (minimum 1:2 Risk/Reward — NEVER trade 1:1):
 ━━━ STEP 8: MARKET SENTIMENT ━━━
 Fear & Greed Index: {fng_val}/100 — {fng['label']}
 {fng_guidance}
+
+Funding Rate: {funding_rate['label']}
+  → Positive funding = market over-long → fade longs, prefer shorts
+  → Negative funding = market over-short → fade shorts, prefer longs
+  → Extreme funding (>0.1%) = HIGH contrarian signal, add ±8 confidence
 
 ━━━ STEP 9: SESSION ADVANTAGE ━━━
 Session: {self._trading_session()}
@@ -332,7 +348,7 @@ Respond ONLY with this exact JSON (no markdown, no preamble, no explanation):
             print(f'[Claude] Error getting signal: {e}')
             return None
 
-    def weekly_report(self, symbols: list, market_data_list: list) -> str:
+    def weekly_report(self, market_data_list: list) -> str:
         summary = '\n'.join([
             f"{d['symbol']}: ${d['price']} | RSI {d['rsi']} | {d['structure']} | F&G {d['fear_greed']['value']} | {d.get('candle_pattern','')}"
             for d in market_data_list

@@ -7,11 +7,11 @@ import datetime
 @dataclass
 class RiskSettings:
     account_usdt:     float = 10000.0
-    risk_pct:         float = 1.5
+    risk_pct:         float = 1.0
     max_trade_usdt:   float = 150.0
-    min_confidence:   int   = 65
+    min_confidence:   int   = 72
     daily_loss_limit: float = 250.0
-    min_rr:           float = 2.0
+    min_rr:           float = 3.0
     max_concurrent:   int   = 3
 
 
@@ -202,7 +202,10 @@ class RiskManager:
             self._check_pause_conditions(pnl_usdt)
 
     def _check_pause_conditions(self, pnl_usdt: float):
-        if self.consecutive_losses >= 3:
+        if self.consecutive_losses >= 5:
+            self.pause_until = time.time() + 259200  # 72 hours
+            print(f'[Risk] 5 consecutive losses — pausing trading for 72 hours')
+        elif self.consecutive_losses >= 3:
             self.pause_until = time.time() + 7200  # 2 hours
             print(f'[Risk] 3 consecutive losses — pausing trading for 2 hours')
 
@@ -239,6 +242,32 @@ class RiskManager:
             'daily_loss_limit':    self.settings.daily_loss_limit,
             'daily_loss_used_pct': round(abs(min(self.daily_pnl, 0)) / self.settings.daily_loss_limit * 100, 1),
         }
+
+    # ── PARTIAL PROFIT ENGINE (Phase 2B) ──────────────────────────────────────
+
+    def scale_out_plan(self, entry: float, qty: float,
+                       tp1: float, tp2: float, tp3: float) -> dict:
+        """
+        Returns a scale-out plan: qty to close at each TP level and new SL after each hit.
+        Default split: 40% at TP1, 40% at TP2, 20% runner to TP3.
+        """
+        qty_tp1    = round(qty * 0.40, 6)
+        qty_tp2    = round(qty * 0.40, 6)
+        qty_runner = round(qty - qty_tp1 - qty_tp2, 6)
+        return {
+            'tp1':    {'price': tp1, 'qty': qty_tp1,    'new_sl': entry},   # move SL to BE
+            'tp2':    {'price': tp2, 'qty': qty_tp2,    'new_sl': tp1},     # trail SL to TP1
+            'runner': {'price': tp3, 'qty': qty_runner, 'new_sl': tp2},     # trail SL to TP2
+        }
+
+    def expected_value(self, entry: float, sl: float,
+                       tp1: float, win_rate: float = 0.45) -> dict:
+        """Quick EV calculation to confirm a trade is positive-expectancy."""
+        risk   = abs(entry - sl)
+        reward = abs(tp1 - entry)
+        rr     = round(reward / risk, 2) if risk else 0
+        ev     = round(win_rate * reward - (1 - win_rate) * risk, 4)
+        return {'rr': rr, 'ev': ev, 'positive': ev > 0}
 
     # ── HELPERS ────────────────────────────────────────────────────────────────
 

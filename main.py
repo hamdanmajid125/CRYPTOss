@@ -26,6 +26,9 @@ from claude_agent import ClaudeAgent
 from weex_client import WeexClient
 from risk_manager import RiskManager, RiskSettings
 from telegram_notifier import TelegramNotifier
+from news_watcher import NewsWatcher
+from trade_journal import TradeJournal
+from pump_scanner import PumpScanner
 import ccxt
 
 app = FastAPI(title='AI Trade Terminal', version='3.0.0', lifespan=lifespan)
@@ -65,6 +68,9 @@ weex = WeexClient(
     passphrase = os.getenv('WEEX_PASSPHRASE', ''),
     paper      = PAPER,
 )
+news_watcher  = NewsWatcher(blackout_minutes=int(os.getenv('NEWS_BLACKOUT_MIN', '30')))
+journal       = TradeJournal()
+pump_scanner  = PumpScanner(public_exchange)
 
 # ── WebSocket registry ─────────────────────────────────────────────────────────
 clients: List[WebSocket] = []
@@ -100,8 +106,19 @@ async def bg_auto_scanner():
 
     while True:
         try:
-            # Step 1: Get top coins by volume (cached for 10 min)
-            top_coins = feed.get_top_coins_by_volume(top_n=TOP_N_COINS)
+            # Step 1: Get top coins — merge volume list with pump scanner hits
+            top_coins   = feed.get_top_coins_by_volume(top_n=TOP_N_COINS)
+            pump_coins  = pump_scanner.get_pump_symbols()
+            # Insert pump coins at front (deduplicated) so they get analysed first
+            seen = set()
+            merged = []
+            for c in (pump_coins + top_coins):
+                if c not in seen:
+                    seen.add(c)
+                    merged.append(c)
+            top_coins = merged[:TOP_N_COINS + len(pump_coins)]
+            if pump_coins:
+                print(f'[PumpScanner] Prioritising {len(pump_coins)} pumping coins: {pump_coins[:5]}')
 
             print(f'[AutoScanner] Scanning {len(top_coins)} coins: {top_coins}')
             await broadcast({
@@ -246,6 +263,14 @@ async def bg_fng_update():
 
 # ── TRADE EXECUTION ────────────────────────────────────────────────────────────
 async def maybe_execute(signal: Dict):
+    # News blackout check — skip trades ±30 min around high-impact events
+    blacked_out, blackout_reason = news_watcher.is_blackout()
+    if blacked_out:
+        print(f'[NewsWatcher] {blackout_reason}')
+        await broadcast({'type': 'trade_skipped', 'reason': blackout_reason,
+                         'symbol': signal.get('symbol')})
+        return
+
     can, reason = risk.can_trade(signal)
     log_trade(f"ATTEMPT | {signal.get('symbol')} | {signal.get('action')} | conf:{signal.get('confidence')} | {reason}")
 
@@ -269,13 +294,17 @@ async def maybe_execute(signal: Dict):
     if qty <= 0:
         return
 
+    sig_id = journal.log_signal(signal)
     try:
         result = weex.place_order(signal['symbol'], signal['action'],
                                   qty, entry, sl, tp1, tp2, tp3)
         if result:
-            risk.record_open(result.get('id', ''), signal)
+            order_id = result.get('id', '')
+            risk.record_open(order_id, signal)
+            journal.log_trade_open(sig_id, order_id, signal['symbol'],
+                                   signal['action'], qty, entry, sl, tp1, paper=PAPER)
             await broadcast({'type': 'trade_opened', 'order': result, 'signal': signal})
-            log_trade(f"OPENED | {signal['action']} {qty} {signal['symbol']} @ {entry} | SL:{sl} TP1:{tp1} | id:{result.get('id')}")
+            log_trade(f"OPENED | {signal['action']} {qty} {signal['symbol']} @ {entry} | SL:{sl} TP1:{tp1} | id:{order_id}")
             notifier.send_trade_opened(signal['symbol'], signal['action'], qty, entry, sl, tp1)
     except Exception as e:
         log_trade(f"ERROR | {signal.get('symbol')} | {e}")
@@ -333,6 +362,42 @@ async def get_sentiment():
 async def get_positions():
     return weex.get_positions()
 
+@app.post('/scan')
+async def scan_now(background_tasks: BackgroundTasks):
+    """Trigger an immediate scan cycle (called by dashboard Scan All button)."""
+    async def _run():
+        top_coins = feed.get_top_coins_by_volume(top_n=TOP_N_COINS)
+        await broadcast({'type': 'scan_start', 'coins': top_coins, 'count': len(top_coins),
+                         'message': f'Manual scan — {len(top_coins)} coins'})
+        signals_found = []
+        for symbol in top_coins:
+            try:
+                data = feed.get_full_analysis(symbol, '1h')
+                tf_overall = data.get('timeframe_bias', {}).get('overall', 'MIXED')
+                vol_signal = data.get('volume_signal', 'NORMAL')
+                if tf_overall == 'MIXED' or 'VERY LOW' in vol_signal:
+                    await broadcast({'type': 'scan_skip', 'symbol': symbol,
+                                     'reason': 'Mixed TF or very low volume'})
+                    await asyncio.sleep(0.3)
+                    continue
+                signal = claude.get_signal(data)
+                if signal:
+                    await broadcast({'type': 'signal', 'symbol': symbol, 'signal': signal})
+                    if signal.get('action') in ('LONG', 'SHORT'):
+                        signals_found.append(signal)
+                        notifier.send_signal(signal)
+                        if AUTO_TRADE:
+                            await maybe_execute(signal)
+                await asyncio.sleep(1)
+            except Exception as e:
+                print(f'[ManualScan] {symbol}: {e}')
+        await broadcast({'type': 'scan_complete', 'total_scanned': len(top_coins),
+                         'signals_found': len(signals_found), 'next_scan_in': SCAN_INTERVAL,
+                         'message': f'Scan done — {len(signals_found)} signal(s) found.'})
+    background_tasks.add_task(_run)
+    return {'status': 'scan_started', 'coins': TOP_N_COINS}
+
+
 @app.post('/analyze/{symbol:path}')
 async def analyze_manual(symbol: str, background_tasks: BackgroundTasks):
     """Manual single-coin analysis (for testing specific coins)."""
@@ -360,6 +425,37 @@ async def update_settings(body: Dict):
     risk.settings.daily_loss_limit = body.get('daily_loss_limit', risk.settings.daily_loss_limit)
     return {'ok': True, 'auto_trade': AUTO_TRADE, 'scan_interval': SCAN_INTERVAL,
             'top_n_coins': TOP_N_COINS, 'settings': risk.settings.__dict__}
+
+@app.get('/pumps')
+async def get_pumps():
+    """Returns current pump/dump movers — coins with unusual volume+price spikes."""
+    return {'pumps': pump_scanner.scan(), 'count': len(pump_scanner._cache['results'])}
+
+@app.get('/journal/signals')
+async def journal_signals(limit: int = 50):
+    return journal.get_recent_signals(limit=limit)
+
+@app.get('/journal/trades')
+async def journal_trades():
+    return journal.get_open_trades()
+
+@app.get('/journal/stats')
+async def journal_stats():
+    return {
+        'win_rate':   journal.get_win_rate(),
+        'daily':      journal.get_daily_stats(days=7),
+        'best_setups': journal.get_best_setups(),
+    }
+
+@app.get('/news/events')
+async def news_events():
+    blacked_out, reason = news_watcher.is_blackout()
+    return {
+        'blackout':    blacked_out,
+        'reason':      reason,
+        'next_event':  news_watcher.next_event(),
+        'all_events':  news_watcher.get_events(),
+    }
 
 @app.post('/emergency/stop')
 async def emergency_stop():

@@ -154,13 +154,37 @@ class WeexClient:
             'tp1': tp1,
         }
 
+    # Maximum allowed slippage from intended entry (0.15%)
+    _MAX_SLIPPAGE_PCT = 0.0015
+
+    def _check_slippage(self, symbol: str, intended_entry: float, side: str) -> tuple:
+        """
+        Fetches live bid/ask and checks whether the fill would exceed the
+        max slippage threshold. Returns (ok: bool, live_price: float).
+        """
+        try:
+            ticker = self._public.fetch_ticker(symbol)
+            live   = ticker['ask'] if side == 'LONG' else ticker['bid']
+            slip   = abs(live - intended_entry) / intended_entry
+            if slip > self._MAX_SLIPPAGE_PCT:
+                print(f'[WEEX] Slippage {slip*100:.3f}% > {self._MAX_SLIPPAGE_PCT*100:.2f}% — order rejected')
+                return False, live
+            return True, live
+        except Exception:
+            return True, intended_entry   # if check fails, allow order (don't block)
+
     def _live_place_order(self, symbol: str, side: str, qty: float,
                           entry: float, sl: float, tp1: float,
                           tp2: float = 0) -> Optional[Dict]:
         try:
+            # Slippage gate — reject if market moved too far from signal entry
+            ok, live_price = self._check_slippage(symbol, entry, side)
+            if not ok:
+                return None
+
             # Limit entry near current price (0.05% offset for fast fill)
             ccxt_side = 'buy' if side == 'LONG' else 'sell'
-            limit_price = round(entry * 0.9995 if side == 'LONG' else entry * 1.0005, 2)
+            limit_price = round(live_price * 0.9995 if side == 'LONG' else live_price * 1.0005, 2)
 
             order = self.exchange.create_order(
                 symbol=symbol,

@@ -3,6 +3,7 @@ import pandas as pd
 import pandas_ta_classic as ta
 import requests
 import time
+import xml.etree.ElementTree as ET
 
 class DataFeed:
 
@@ -35,6 +36,9 @@ class DataFeed:
                 # Skip stablecoins and wrapped tokens
                 base = symbol.replace('/USDT', '')
                 if base in ('USDT', 'USDC', 'BUSD', 'DAI', 'TUSD', 'USDP', 'FDUSD'):
+                    continue
+                # Skip coins with non-ASCII characters (e.g. Chinese-name tokens)
+                if not base.isascii() or not base.isalnum():
                     continue
                 quote_vol = t.get('quoteVolume') or 0
                 if quote_vol < min_volume_usdt:
@@ -271,49 +275,223 @@ class DataFeed:
         return 'Ranging'
 
     # ─────────────────────────────────────────────────────────────────────
-    # NEWS SENTIMENT  (CryptoPanic — free public endpoint, no key needed)
+    # BOS / CHoCH DETECTION  (Phase 2A)
     # ─────────────────────────────────────────────────────────────────────
+    def detect_bos_choch(self, df: pd.DataFrame) -> dict:
+        """
+        Detects the most recent Break of Structure (BOS) or Change of Character (CHoCH).
+        Uses swing highs/lows over the last 50 candles.
+        Returns dict with keys: type ('BOS_BULLISH'|'BOS_BEARISH'|'CHoCH_BULLISH'|'CHoCH_BEARISH'|'NONE'),
+                                 level (price of the broken structure), confirmed (bool).
+        """
+        if len(df) < 20:
+            return {'type': 'NONE', 'level': 0, 'confirmed': False}
+
+        window = df.tail(50).copy()
+        highs  = window['high'].values
+        lows   = window['low'].values
+        closes = window['close'].values
+
+        def swing_highs(arr, lookback=5):
+            result = []
+            for i in range(lookback, len(arr) - lookback):
+                if arr[i] == max(arr[i - lookback:i + lookback + 1]):
+                    result.append((i, arr[i]))
+            return result
+
+        def swing_lows(arr, lookback=5):
+            result = []
+            for i in range(lookback, len(arr) - lookback):
+                if arr[i] == min(arr[i - lookback:i + lookback + 1]):
+                    result.append((i, arr[i]))
+            return result
+
+        sh = swing_highs(highs)
+        sl = swing_lows(lows)
+
+        if len(sh) < 2 or len(sl) < 2:
+            return {'type': 'NONE', 'level': 0, 'confirmed': False}
+
+        last_close = closes[-1]
+        prev_close = closes[-2]
+
+        # BOS Bullish: close breaks above the most recent swing high
+        _, last_sh_price = sh[-1]
+        _, prev_sh_price = sh[-2]
+
+        # BOS Bearish: close breaks below the most recent swing low
+        _, last_sl_price = sl[-1]
+        _, prev_sl_price = sl[-2]
+
+        # CHoCH: structure flip — previously making lower-highs now breaks above, or vice versa
+        making_lower_highs = last_sh_price < prev_sh_price
+        making_higher_lows = last_sl_price > prev_sl_price
+
+        if last_close > last_sh_price and prev_close <= last_sh_price:
+            if making_lower_highs:
+                return {'type': 'CHoCH_BULLISH', 'level': round(float(last_sh_price), 6), 'confirmed': True}
+            return {'type': 'BOS_BULLISH', 'level': round(float(last_sh_price), 6), 'confirmed': True}
+
+        if last_close < last_sl_price and prev_close >= last_sl_price:
+            if making_higher_lows:
+                return {'type': 'CHoCH_BEARISH', 'level': round(float(last_sl_price), 6), 'confirmed': True}
+            return {'type': 'BOS_BEARISH', 'level': round(float(last_sl_price), 6), 'confirmed': True}
+
+        # Unconfirmed — price approaching but not broken yet
+        if last_close > last_sh_price * 0.998:
+            return {'type': 'BOS_BULLISH', 'level': round(float(last_sh_price), 6), 'confirmed': False}
+        if last_close < last_sl_price * 1.002:
+            return {'type': 'BOS_BEARISH', 'level': round(float(last_sl_price), 6), 'confirmed': False}
+
+        return {'type': 'NONE', 'level': 0, 'confirmed': False}
+
+    # ─────────────────────────────────────────────────────────────────────
+    # MARKET REGIME DETECTION  (Phase 2C)
+    # ─────────────────────────────────────────────────────────────────────
+    def detect_regime(self, df: pd.DataFrame) -> str:
+        """
+        Classifies current market regime using ATR volatility + EMA slope.
+        Returns: 'TRENDING_BULL' | 'TRENDING_BEAR' | 'RANGING' | 'HIGH_VOLATILITY'
+        """
+        if len(df) < 30:
+            return 'RANGING'
+
+        last   = df.iloc[-1]
+        prev10 = df.iloc[-10]
+
+        atr_now  = float(last['atr']) if not pd.isna(last['atr']) else 0
+        atr_mean = float(df['atr'].tail(20).mean()) if not df['atr'].tail(20).isna().all() else atr_now
+
+        # High volatility: ATR is 1.5x its 20-period average
+        if atr_now > atr_mean * 1.5:
+            return 'HIGH_VOLATILITY'
+
+        # EMA slope: compare current EMA20 to EMA20 10 candles ago
+        ema20_now  = float(last['ema20'])  if not pd.isna(last['ema20'])  else 0
+        ema20_prev = float(prev10['ema20']) if not pd.isna(prev10['ema20']) else ema20_now
+
+        slope_pct = (ema20_now - ema20_prev) / ema20_prev * 100 if ema20_prev else 0
+
+        if slope_pct > 0.5:
+            return 'TRENDING_BULL'
+        elif slope_pct < -0.5:
+            return 'TRENDING_BEAR'
+        return 'RANGING'
+
+    # ─────────────────────────────────────────────────────────────────────
+    # NEWS SENTIMENT  (free RSS — CoinDesk + CoinTelegraph + Decrypt)
+    # No API key needed. Cached 10 min per coin.
+    # ─────────────────────────────────────────────────────────────────────
+
+    _RSS_FEEDS = [
+        'https://www.coindesk.com/arc/outboundfeeds/rss/',
+        'https://cointelegraph.com/rss',
+        'https://decrypt.co/feed',
+    ]
+
+    # Keyword lists for headline sentiment scoring
+    _BULL_WORDS = (
+        'surge', 'rally', 'bullish', 'breakout', 'gain', 'rise', 'soar',
+        'pump', 'buy', 'upgrade', 'adoption', 'partnership', 'launch',
+        'approval', 'etf approved', 'record', 'high', 'institutional',
+        'accumulate', 'support', 'recovery', 'bounce', 'moon',
+    )
+    _BEAR_WORDS = (
+        'crash', 'drop', 'bearish', 'dump', 'sell', 'fear', 'hack',
+        'exploit', 'ban', 'lawsuit', 'sec', 'regulation', 'fine',
+        'fraud', 'scam', 'low', 'plunge', 'collapse', 'liquidat',
+        'downgrade', 'delist', 'restrict', 'warning', 'risk',
+    )
+
+    # Shared RSS cache — fetched once, filtered per coin
+    _rss_cache: dict = {'items': [], 'ts': 0}
+
+    def _fetch_rss_headlines(self) -> list:
+        """Fetches all RSS feeds and returns a flat list of title strings. Cached 10 min."""
+        now = time.time()
+        if now - self._rss_cache['ts'] < 600 and self._rss_cache['items']:
+            return self._rss_cache['items']
+
+        headlines = []
+        for url in self._RSS_FEEDS:
+            try:
+                r = requests.get(url, timeout=6,
+                                 headers={'User-Agent': 'Mozilla/5.0'})
+                if not r.ok:
+                    continue
+                root = ET.fromstring(r.content)
+                for item in root.iter('item'):
+                    title = (item.findtext('title') or '').strip()
+                    if title:
+                        headlines.append(title.lower())
+            except Exception:
+                continue
+
+        self._rss_cache['items'] = headlines
+        self._rss_cache['ts'] = now
+        return headlines
+
     def get_news_sentiment(self, symbol: str) -> str:
         """
-        Fetches recent news for a coin from CryptoPanic and returns a
-        one-line sentiment string passed to the Claude prompt.
-        Results cached 10 minutes per symbol to avoid hammering the API.
+        Scores recent crypto headlines from CoinDesk/CoinTelegraph/Decrypt
+        for the given coin. Returns a one-line sentiment string for Claude.
+        No API key required. Results cached 10 minutes per symbol.
         """
         now  = time.time()
-        base = symbol.replace('/USDT', '').replace('/BTC', '')
+        base = symbol.replace('/USDT', '').replace('/BTC', '').lower()
         cached = self._news_cache.get(base)
         if cached and now - cached['ts'] < 600:
             return cached['sentiment']
 
         try:
-            params = {'public': 'true', 'currencies': base, 'kind': 'news', 'limit': 5}
-            if self._cryptopanic_token:
-                params['auth_token'] = self._cryptopanic_token
+            all_headlines = self._fetch_rss_headlines()
 
-            r = requests.get(
-                'https://cryptopanic.com/api/v1/posts/',
-                params=params,
-                timeout=6,
-            )
-            if not r.ok:
-                raise ValueError(f'HTTP {r.status_code}')
+            # Common coin name aliases so 'bitcoin' matches 'BTC' etc.
+            aliases = {
+                'btc': ['bitcoin', 'btc'],
+                'eth': ['ethereum', 'eth', 'ether'],
+                'sol': ['solana', 'sol'],
+                'bnb': ['bnb', 'binance coin', 'binance'],
+                'xrp': ['xrp', 'ripple'],
+                'doge': ['dogecoin', 'doge'],
+                'ada': ['cardano', 'ada'],
+                'avax': ['avalanche', 'avax'],
+                'link': ['chainlink', 'link'],
+                'dot': ['polkadot', 'dot'],
+                'matic': ['polygon', 'matic'],
+                'arb': ['arbitrum', 'arb'],
+                'op': ['optimism', ' op '],
+                'sui': ['sui'],
+                'inj': ['injective', 'inj'],
+            }
+            search_terms = aliases.get(base, [base])
 
-            results = r.json().get('results', [])
-            if not results:
-                sentiment = 'No recent news'
+            # Filter headlines mentioning this coin
+            relevant = [h for h in all_headlines
+                        if any(t in h for t in search_terms)]
+
+            if not relevant:
+                # Fallback: score general crypto sentiment from all headlines
+                relevant = all_headlines[:20]
+
+            bull = sum(1 for h in relevant for w in self._BULL_WORDS if w in h)
+            bear = sum(1 for h in relevant for w in self._BEAR_WORDS if w in h)
+
+            if bull == 0 and bear == 0:
+                sentiment = 'No significant news'
+            elif bear > bull * 1.5:
+                label = 'NEGATIVE'
+                preview = next((h for h in relevant
+                                if any(w in h for w in self._BEAR_WORDS)), relevant[0])
+                sentiment = f'{label} — {preview[:80]}'
+            elif bull > bear * 1.5:
+                label = 'POSITIVE'
+                preview = next((h for h in relevant
+                                if any(w in h for w in self._BULL_WORDS)), relevant[0])
+                sentiment = f'{label} — {preview[:80]}'
             else:
-                pos = sum(a.get('votes', {}).get('positive', 0) for a in results)
-                neg = sum(a.get('votes', {}).get('negative', 0) for a in results)
-                headlines = ' | '.join(a['title'][:60] for a in results[:2])
-
-                if neg > pos * 1.5:
-                    label = 'NEGATIVE'
-                elif pos > neg * 1.5:
-                    label = 'POSITIVE'
-                else:
-                    label = 'MIXED'
-
-                sentiment = f'{label} — {headlines}'
+                label = 'MIXED'
+                sentiment = f'{label} — bull:{bull} bear:{bear} signals in {len(relevant)} headlines'
 
         except Exception as e:
             print(f'[News] {base}: {e}')
@@ -321,6 +499,51 @@ class DataFeed:
 
         self._news_cache[base] = {'sentiment': sentiment, 'ts': now}
         return sentiment
+
+    # ─────────────────────────────────────────────────────────────────────
+    # FUNDING RATE  (Phase 6 — Binance perpetual, free public endpoint)
+    # ─────────────────────────────────────────────────────────────────────
+    def get_funding_rate(self, symbol: str) -> dict:
+        """
+        Fetches current funding rate from Binance perp market (public, no key).
+        Positive rate = longs pay shorts (market is over-leveraged long → bearish lean).
+        Negative rate = shorts pay longs (market over-leveraged short → bullish lean).
+        Cached 15 minutes per symbol.
+        """
+        now  = time.time()
+        base = symbol.replace('/USDT', '').replace('/BTC', '')
+        key  = f'fr_{base}'
+        cached = self._news_cache.get(key)
+        if cached and now - cached['ts'] < 900:
+            return cached['data']
+
+        result = {'rate': 0.0, 'label': 'Neutral', 'bias': 'NEUTRAL'}
+        try:
+            perp = base + 'USDT'
+            r = requests.get(
+                'https://fapi.binance.com/fapi/v1/premiumIndex',
+                params={'symbol': perp},
+                timeout=5,
+            )
+            if r.ok:
+                data  = r.json()
+                rate  = float(data.get('lastFundingRate', 0))
+                pct   = round(rate * 100, 4)
+                if rate > 0.0005:
+                    label = f'HIGH POSITIVE ({pct}%) — longs over-leveraged, SHORT bias'
+                    bias  = 'BEARISH'
+                elif rate < -0.0005:
+                    label = f'NEGATIVE ({pct}%) — shorts over-leveraged, LONG bias'
+                    bias  = 'BULLISH'
+                else:
+                    label = f'Neutral ({pct}%)'
+                    bias  = 'NEUTRAL'
+                result = {'rate': pct, 'label': label, 'bias': bias}
+        except Exception:
+            pass
+
+        self._news_cache[key] = {'data': result, 'ts': now}
+        return result
 
     # ─────────────────────────────────────────────────────────────────────
     # FEAR & GREED
@@ -391,6 +614,9 @@ class DataFeed:
         rsi_div        = self.detect_rsi_divergence(df)
         candle_pattern = self.detect_candle_pattern(df)
         news_sentiment = self.get_news_sentiment(symbol)
+        bos_choch      = self.detect_bos_choch(df)
+        regime         = self.detect_regime(df)
+        funding_rate   = self.get_funding_rate(symbol)
 
         return {
             'symbol':         symbol,
@@ -420,5 +646,8 @@ class DataFeed:
             'liquidity':      self.find_liquidity_levels(df),
             'order_blocks':   self.find_order_blocks(df),
             'fvgs':           self.find_fvgs(df),
+            'bos_choch':      bos_choch,
+            'regime':         regime,
+            'funding_rate':   funding_rate,
             'candles':        df.tail(80)[['open', 'high', 'low', 'close', 'volume']].to_dict('records'),
         }
