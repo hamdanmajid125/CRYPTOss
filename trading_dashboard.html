@@ -132,7 +132,8 @@
     .tab.active{color:var(--cyan);border-bottom-color:var(--cyan)}
     .tab-content{display:none;flex:1;overflow-y:auto;flex-direction:column}
     .tab-content.active{display:flex}
-    .trade-item{padding:7px 11px;border-bottom:1px solid var(--border);border-left:3px solid transparent}
+    .trade-item{padding:7px 11px;border-bottom:1px solid var(--border);border-left:3px solid transparent;cursor:pointer;transition:background .1s}
+    .trade-item:hover{background:var(--bg3)}
     .trade-item.LONG{border-left-color:var(--green)}
     .trade-item.SHORT{border-left-color:var(--red)}
     .trade-row1{display:flex;justify-content:space-between;margin-bottom:2px}
@@ -166,6 +167,61 @@
 
     ::-webkit-scrollbar{width:3px}
     ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+
+    /* TOAST NOTIFICATIONS */
+    #toastContainer{position:fixed;bottom:18px;right:18px;z-index:10000;display:flex;flex-direction:column-reverse;gap:8px;pointer-events:none}
+    .toast{background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:10px 13px 14px;min-width:268px;max-width:310px;box-shadow:0 6px 24px rgba(0,0,0,.55);animation:toastIn .22s ease;position:relative;overflow:hidden;pointer-events:all}
+    .toast.removing{animation:toastOut .28s ease forwards}
+    @keyframes toastIn{from{opacity:0;transform:translateX(110%)}to{opacity:1;transform:translateX(0)}}
+    @keyframes toastOut{from{opacity:1;transform:translateX(0)}to{opacity:0;transform:translateX(110%)}}
+    .toast.LONG{border-left:3px solid var(--green)}
+    .toast.SHORT{border-left:3px solid var(--red)}
+    .toast.WIN{border-left:3px solid var(--cyan)}
+    .toast.LOSS{border-left:3px solid var(--orange)}
+    .toast.INFO{border-left:3px solid var(--purple)}
+    .toast-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px}
+    .toast-title{font-weight:700;font-size:11px;color:var(--textHi);line-height:1.3}
+    .toast-x{cursor:pointer;color:var(--textDim);font-size:15px;line-height:1;background:none;border:none;font-family:var(--font);padding:0 0 0 8px;flex-shrink:0}
+    .toast-body{font-size:10px;color:var(--text);line-height:1.6}
+    .toast-bar{position:absolute;bottom:0;left:0;height:2px;background:var(--border2);animation:toastBar var(--dur,8s) linear forwards}
+    @keyframes toastBar{from{width:100%}to{width:0%}}
+
+    /* TRADE MODAL */
+    .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:20000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);animation:fadeIn .15s ease}
+    @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+    .trade-modal{background:var(--bg2);border:1px solid var(--border2);border-radius:8px;width:468px;max-width:96vw;max-height:92vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,.75);animation:slideUp .18s ease}
+    @keyframes slideUp{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:translateY(0)}}
+    .modal-hdr{padding:13px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-shrink:0}
+    .modal-title{font-family:var(--fontTitle);font-size:15px;font-weight:700;color:var(--textHi);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .modal-close{background:none;border:none;color:var(--textDim);font-size:22px;cursor:pointer;line-height:1;padding:0 2px;font-family:var(--font);transition:color .1s}
+    .modal-close:hover{color:var(--red)}
+    .modal-body{padding:13px 15px;display:flex;flex-direction:column;gap:10px}
+    .modal-section{background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:10px 12px}
+    .modal-section-lbl{font-size:8px;color:var(--textDim);letter-spacing:2px;text-transform:uppercase;margin-bottom:8px}
+    .modal-grid5{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+    .modal-grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}
+    .modal-cell{display:flex;flex-direction:column;gap:2px}
+    .modal-cell .mc-lbl{font-size:7px;color:var(--textDim);letter-spacing:1px;text-transform:uppercase}
+    .modal-cell .mc-val{font-size:11px;font-weight:600}
+    .lev-slider-wrap{display:flex;align-items:center;gap:8px;margin-top:6px}
+    .lev-slider{flex:1;-webkit-appearance:none;appearance:none;height:4px;border-radius:2px;background:var(--bg);outline:none;border:1px solid var(--border);cursor:pointer}
+    .lev-slider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:15px;height:15px;border-radius:50%;background:var(--cyan);cursor:pointer;border:2px solid var(--bg2)}
+    .lev-slider::-moz-range-thumb{width:15px;height:15px;border-radius:50%;background:var(--cyan);cursor:pointer;border:2px solid var(--bg2)}
+    .lev-display{font-size:24px;font-weight:700;color:var(--cyan);min-width:52px;text-align:right;line-height:1}
+    .pnl-row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)}
+    .pnl-row:last-child{border:none}
+    .pnl-lbl{font-size:9px;color:var(--textDim)}
+    .pnl-val{font-size:11px;font-weight:700}
+    .modal-footer{padding:11px 15px;border-top:1px solid var(--border);display:flex;gap:8px;flex-shrink:0}
+    .btn-execute{flex:2;padding:12px;background:linear-gradient(135deg,rgba(0,255,136,.25),rgba(0,204,106,.35));border:1px solid var(--green2);border-radius:5px;font-family:var(--font);font-size:12px;font-weight:700;color:var(--green);cursor:pointer;letter-spacing:.5px;transition:all .15s}
+    .btn-execute:hover{background:linear-gradient(135deg,rgba(0,255,136,.35),rgba(0,204,106,.5));filter:brightness(1.1)}
+    .btn-execute:active{transform:scale(.97)}
+    .btn-execute.SHORT-exec{background:linear-gradient(135deg,rgba(255,68,102,.2),rgba(204,51,85,.3));border-color:var(--red2);color:var(--red)}
+    .btn-execute.SHORT-exec:hover{background:linear-gradient(135deg,rgba(255,68,102,.32),rgba(204,51,85,.45))}
+    .btn-cancel-modal{flex:1;padding:12px;background:transparent;border:1px solid var(--border2);border-radius:5px;font-family:var(--font);font-size:11px;font-weight:600;color:var(--textDim);cursor:pointer;transition:all .15s}
+    .btn-cancel-modal:hover{border-color:var(--red2);color:var(--red)}
+    .risk-warning{font-size:9px;color:var(--orange);background:var(--orangeBg);border:1px solid var(--orange);border-radius:3px;padding:5px 8px;margin-top:6px;display:none}
+    .tap-hint{font-size:7px;color:var(--cyan);border:1px solid var(--border);border-radius:2px;padding:1px 4px;opacity:.7}
   </style>
 </head>
 <body>
@@ -421,6 +477,91 @@
   </div>
 </div>
 
+<!-- TRADE MODAL -->
+<div id="tradeModalOverlay" style="display:none" onclick="if(event.target===this)closeTradeModal()">
+  <div class="trade-modal">
+    <div class="modal-hdr">
+      <span id="mdDir" class="action-badge WAIT">—</span>
+      <span class="modal-title" id="mdSym">—</span>
+      <span style="font-size:10px;font-weight:700" id="mdConf"></span>
+      <button class="modal-close" onclick="closeTradeModal()">×</button>
+    </div>
+    <div class="modal-body">
+
+      <!-- Price Levels -->
+      <div class="modal-section">
+        <div class="modal-section-lbl">Price Levels</div>
+        <div class="modal-grid5">
+          <div class="modal-cell"><span class="mc-lbl">Entry</span><span class="mc-val" id="mdEntry" style="color:var(--cyan)">—</span></div>
+          <div class="modal-cell"><span class="mc-lbl">Stop Loss</span><span class="mc-val" id="mdSL" style="color:var(--red)">—</span></div>
+          <div class="modal-cell"><span class="mc-lbl">TP1 · 40%</span><span class="mc-val" id="mdTP1" style="color:var(--green)">—</span></div>
+          <div class="modal-cell"><span class="mc-lbl">TP2 · 40%</span><span class="mc-val" id="mdTP2" style="color:var(--green2)">—</span></div>
+          <div class="modal-cell"><span class="mc-lbl">TP3 · 20%</span><span class="mc-val" id="mdTP3" style="color:#00aa55">—</span></div>
+        </div>
+        <div style="display:flex;gap:14px;margin-top:9px;font-size:9px;color:var(--textDim)">
+          <span>SL dist: <b id="mdSLDist" style="color:var(--orange)">—</b></span>
+          <span>R:R: <b id="mdRR" style="color:var(--gold)">—</b></span>
+          <span>Setup: <b id="mdSetup" style="color:var(--purple)">—</b></span>
+        </div>
+      </div>
+
+      <!-- Leverage Selector -->
+      <div class="modal-section">
+        <div class="modal-section-lbl">Leverage — auto-optimised for your risk %</div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="flex:1">
+            <div style="display:flex;justify-content:space-between;font-size:8px;color:var(--textDim);margin-bottom:2px"><span>1x</span><span>20x</span></div>
+            <div class="lev-slider-wrap" style="margin-top:0">
+              <input type="range" class="lev-slider" id="mdLevSlider" min="1" max="20" value="3" oninput="updateModalCalc()"/>
+            </div>
+          </div>
+          <div class="lev-display" id="mdLevDisplay">3x</div>
+        </div>
+        <div class="modal-grid3" style="margin-top:9px">
+          <div class="modal-cell"><span class="mc-lbl">Max Risk (USDT)</span><span class="mc-val" id="mdRiskUsdt" style="color:var(--red)">—</span></div>
+          <div class="modal-cell"><span class="mc-lbl">Position Size</span><span class="mc-val" id="mdPosSize" style="color:var(--cyan)">—</span></div>
+          <div class="modal-cell"><span class="mc-lbl">Account Balance</span><span class="mc-val" id="mdAccount" style="color:var(--textHi)">—</span></div>
+        </div>
+        <div class="risk-warning" id="mdRiskWarn">⚠ High leverage — liquidation risk is elevated</div>
+      </div>
+
+      <!-- P&L Predictions -->
+      <div class="modal-section">
+        <div class="modal-section-lbl">Predicted P&L at this leverage</div>
+        <div class="pnl-row">
+          <span class="pnl-lbl">TP1 hit &nbsp;<span style="opacity:.5">(close 40%)</span></span>
+          <span class="pnl-val" id="mdPnlTP1" style="color:var(--green)">—</span>
+        </div>
+        <div class="pnl-row">
+          <span class="pnl-lbl">TP2 hit &nbsp;<span style="opacity:.5">(close 40%)</span></span>
+          <span class="pnl-val" id="mdPnlTP2" style="color:var(--green2)">—</span>
+        </div>
+        <div class="pnl-row">
+          <span class="pnl-lbl">TP3 hit &nbsp;<span style="opacity:.5">(runner 20%)</span></span>
+          <span class="pnl-val" id="mdPnlTP3" style="color:var(--cyan)">—</span>
+        </div>
+        <div class="pnl-row">
+          <span class="pnl-lbl" style="color:var(--gold)">Full sweep (all TPs hit)</span>
+          <span class="pnl-val" id="mdPnlMax" style="color:var(--gold)">—</span>
+        </div>
+        <div class="pnl-row">
+          <span class="pnl-lbl" style="color:var(--red)">SL hit — max loss</span>
+          <span class="pnl-val" id="mdPnlSL" style="color:var(--red)">—</span>
+        </div>
+      </div>
+
+      <!-- Claude Reason -->
+      <div id="mdReason" style="font-size:9px;color:var(--textDim);line-height:1.65;padding:2px 2px;display:none"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-cancel-modal" onclick="closeTradeModal()">CANCEL</button>
+      <button class="btn-execute" id="mdExecBtn" onclick="executeModalTrade()">⬆ EXECUTE LONG</button>
+    </div>
+  </div>
+</div>
+
+<div id="toastContainer"></div>
+
 <script>
 // ── STATE ─────────────────────────────────────────────────────────────────────
 const S = {
@@ -429,7 +570,7 @@ const S = {
   activeTab:0, ws:null, backendConnected:false,
   positions:[], autoTrade:false, stats:{}, balance:{},
   scanProgress:0, scanTotal:0, scanningCoin:'',
-  lastSignal:null,
+  lastSignal:null, modalTrade:null, modalBalance:0,
 };
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
@@ -438,6 +579,25 @@ function fmtP(p){ return p>1000?p.toFixed(1):p>10?p.toFixed(3):p>0.1?p.toFixed(4
 function fmtU(v){ const n=parseFloat(v)||0; return (n>=0?'+':'')+n.toFixed(2); }
 function clr(v){ return parseFloat(v)>=0?'var(--green)':'var(--red)'; }
 function set(id,txt,col){ const el=$(id); if(!el)return; el.textContent=txt; if(col)el.style.color=col; }
+
+// ── TOAST NOTIFICATIONS ───────────────────────────────────────────────────────
+function showToast(type, title, body, duration = 8000) {
+  const c = $('toastContainer');
+  const t = document.createElement('div');
+  t.className = 'toast ' + type;
+  t.style.setProperty('--dur', duration + 'ms');
+  t.innerHTML = `<div class="toast-hdr">
+    <span class="toast-title">${title}</span>
+    <button class="toast-x" onclick="this.closest('.toast').remove()">×</button>
+  </div>
+  <div class="toast-body">${body}</div>
+  <div class="toast-bar"></div>`;
+  c.appendChild(t);
+  setTimeout(() => {
+    t.classList.add('removing');
+    setTimeout(() => t.remove(), 300);
+  }, duration);
+}
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
 window.onload = () => {
@@ -562,10 +722,13 @@ function setScanCoin(symbol){
   renderMarkets();
 }
 
-function setScanDone(total, found, nextIn){
+function setScanDone(total, found, nextIn, candidates){
   S.scanProgress=S.scanTotal;
   $('scanBarFill').style.width='100%';
-  const msg=`Last scan: ${found} signal(s) from ${total} coins · Next in ${Math.round(nextIn/60)}min`;
+  const cand = candidates||0;
+  const msg = cand
+    ? `${total} scanned → ${cand} to Claude (1 call) → ${found} signal(s) · Next in ${Math.round(nextIn/60)}min`
+    : `Last scan: ${found} signal(s) from ${total} coins · Next in ${Math.round(nextIn/60)}min`;
   set('scanLabel', msg, found>0?'var(--green)':'var(--textDim)');
   set('scanCoin','');
   S.markets.forEach(m=>m.scanning=false);
@@ -585,8 +748,10 @@ function applySignal(sig, fromWs=true){
   if(sig.action!=='WAIT'){
     S.trades.unshift({
       id:Date.now(), symbol:sig.symbol, action:sig.action,
-      entry:sig.entry, sl:sig.sl, tp1:sig.tp1, tp2:sig.tp2, tp3:sig.tp3,
+      entry:sig.entry, sl:sig.sl, tp1:sig.tp1, tp2:sig.tp2||0, tp3:sig.tp3||0,
       confidence:sig.confidence, setup:sig.setup_type,
+      rr:sig.rr||'—', reason:sig.reason||'',
+      key_level:sig.key_level||'', invalidation:sig.invalidation||'',
       time:new Date().toLocaleTimeString(),
       timeframe_bias:sig.timeframe_bias, volume_signal:sig.volume_signal,
       bos:sig.bos_choch||'', regime:sig.regime||'',
@@ -765,21 +930,233 @@ function renderTradeLog(){
     el.innerHTML='<div style="padding:14px;color:var(--textDim);font-size:9px;text-align:center">No signals yet.</div>';
     return;
   }
-  el.innerHTML=S.trades.slice(0,50).map(t=>`
-    <div class="trade-item ${t.action}">
+  el.innerHTML=S.trades.slice(0,50).map((t,i)=>`
+    <div class="trade-item ${t.action}" onclick="openTradeModal(${i})" title="Click to open order form">
       <div class="trade-row1">
         <span style="color:${t.action==='LONG'?'var(--green)':'var(--red)'};font-weight:700;font-size:11px">${t.action} ${t.symbol.replace('/USDT','')}</span>
         <span style="font-size:8px;color:var(--textDim)">${t.time}</span>
       </div>
       <div class="trade-row2"><span>Entry ${t.entry?.toFixed?.(4)||'—'}</span><span>SL ${t.sl?.toFixed?.(4)||'—'}</span></div>
       <div class="trade-row2"><span>TP1 ${t.tp1?.toFixed?.(4)||'—'}</span><span>TP2 ${t.tp2?.toFixed?.(4)||'—'}</span></div>
-      <div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:2px">
+      <div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:3px;align-items:center">
         <span class="pill" style="color:${t.confidence>=72?'var(--green)':'var(--gold)'}">${t.confidence}%</span>
         ${t.setup?`<span class="pill">${t.setup.slice(0,20)}</span>`:''}
         ${t.bos&&t.bos!=='NONE'?`<span class="pill" style="color:var(--purple)">${t.bos}</span>`:''}
         ${t.regime?`<span class="pill">${t.regime}</span>`:''}
+        <span class="tap-hint">TAP TO TRADE</span>
       </div>
     </div>`).join('');
+}
+
+// ── TRADE MODAL ───────────────────────────────────────────────────────────────
+async function openTradeModal(idx){
+  const t = S.trades[idx];
+  if(!t) return;
+  S.modalTrade = t;
+
+  // Show modal immediately with a loading state while we fetch balance
+  const ov = $('tradeModalOverlay');
+  ov.className     = 'modal-overlay';
+  ov.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+
+  // Direction badge + symbol
+  const dir = $('mdDir');
+  dir.textContent = t.action;
+  dir.className   = 'action-badge ' + t.action;
+  set('mdSym', t.symbol);
+  const confEl = $('mdConf');
+  if(confEl){
+    confEl.textContent = t.confidence + '%';
+    confEl.style.color = t.confidence >= 72 ? 'var(--green)' : 'var(--gold)';
+  }
+
+  // Price levels
+  function fmt(v){ return v && !isNaN(v) ? parseFloat(v).toFixed(parseFloat(v) > 100 ? 2 : parseFloat(v) > 1 ? 4 : 6) : '—'; }
+  set('mdEntry', fmt(t.entry));
+  set('mdSL',    fmt(t.sl));
+  set('mdTP1',   fmt(t.tp1));
+  set('mdTP2',   t.tp2 ? fmt(t.tp2) : '—');
+  set('mdTP3',   t.tp3 ? fmt(t.tp3) : '—');
+
+  const slDistPct = t.entry && t.sl ? Math.abs(t.entry - t.sl) / t.entry * 100 : 0;
+  set('mdSLDist', slDistPct.toFixed(2) + '%');
+  set('mdRR',    t.rr || '—');
+  set('mdSetup', (t.setup || '').slice(0, 28));
+
+  // ── Fetch live WEEX free balance ────────────────────────────────────────────
+  set('mdAccount', 'Loading...', 'var(--textDim)');
+  let acc = S.modalBalance || 0;
+  if(acc <= 0){
+    try{
+      const url  = $('backendUrl').value;
+      const res  = await fetch(url + '/balance', {signal: AbortSignal.timeout(3000)});
+      const data = await res.json();
+      const usdt = data.balance?.USDT || data.USDT || {};
+      acc = usdt.free > 0 ? usdt.free : (usdt.total || 0);
+      if(acc > 0) S.modalBalance = acc;
+    } catch(e){ acc = 0; }
+  }
+  if(acc <= 0) acc = parseFloat($('riskAccount').value) || 110; // last-resort fallback
+  S.modalBalance = acc;
+  set('mdAccount', '$' + acc.toFixed(2), 'var(--cyan)');
+
+  // ── Auto-calculate optimal leverage ────────────────────────────────────────
+  // Target: maxLoss = risk_pct% of real balance
+  // positionSize = acc × leverage
+  // maxLoss = positionSize × slDistPct / 100
+  // → leverage = (acc × risk_pct/100) / (acc × slDistPct/100) = risk_pct / slDistPct
+  const riskPct  = parseFloat($('riskPct').value) || 1.5;
+  let autoLev = 1;
+  if(slDistPct > 0){
+    autoLev = Math.round(riskPct / slDistPct);
+    autoLev = Math.max(1, Math.min(20, autoLev));
+  }
+  $('mdLevSlider').value = autoLev;
+
+  // Execute button style
+  const btn = $('mdExecBtn');
+  btn.disabled = false;
+  if(t.action === 'SHORT'){
+    btn.textContent = '⬇ EXECUTE SHORT';
+    btn.className   = 'btn-execute SHORT-exec';
+  } else {
+    btn.textContent = '⬆ EXECUTE LONG';
+    btn.className   = 'btn-execute';
+  }
+
+  // Claude reason
+  const rEl = $('mdReason');
+  if(rEl){
+    const txt = t.reason || '';
+    rEl.textContent = txt;
+    rEl.style.display = txt ? 'block' : 'none';
+  }
+
+  updateModalCalc();
+}
+
+function closeTradeModal(){
+  $('tradeModalOverlay').style.display = 'none';
+  document.body.style.overflow = '';
+  S.modalTrade = null;
+}
+
+function updateModalCalc(){
+  const t = S.modalTrade;
+  if(!t) return;
+
+  const lev     = parseInt($('mdLevSlider').value) || 1;
+  set('mdLevDisplay', lev + 'x');
+
+  // Always use live WEEX balance fetched when modal opened
+  const acc      = S.modalBalance || parseFloat($('riskAccount').value) || 110;
+  const riskPct  = parseFloat($('riskPct').value) || 1.5;
+  const riskUsdt = acc * riskPct / 100;
+  const posSize  = acc * lev;
+
+  set('mdRiskUsdt', '$' + riskUsdt.toFixed(2));
+  set('mdPosSize',  '$' + posSize.toFixed(2));
+
+  const warn = $('mdRiskWarn');
+  if(warn) warn.style.display = lev >= 10 ? 'block' : 'none';
+
+  // P&L per TP — direction-aware
+  const dir   = t.action === 'LONG' ? 1 : -1;
+  const entry = t.entry || 0;
+
+  function calcPnl(tp, fraction){
+    if(!tp || !entry) return null;
+    return posSize * ((tp - entry) / entry) * dir * fraction;
+  }
+
+  const p1  = calcPnl(t.tp1, 0.4);
+  const p2  = calcPnl(t.tp2, 0.4);
+  const p3  = calcPnl(t.tp3, 0.2);
+  const pMax = (p1||0) + (p2||0) + (p3||0);
+  const slDist = entry && t.sl ? Math.abs(t.entry - t.sl) / entry : 0;
+  const pSL = -(posSize * slDist);
+
+  function fmtPnl(v){
+    if(v === null) return '—';
+    return (v >= 0 ? '+' : '') + v.toFixed(2) + ' USDT';
+  }
+
+  const p1El = $('mdPnlTP1'); if(p1El) p1El.textContent = p1 !== null ? fmtPnl(p1) : '—';
+  const p2El = $('mdPnlTP2'); if(p2El) p2El.textContent = p2 !== null ? fmtPnl(p2) : '—';
+  const p3El = $('mdPnlTP3'); if(p3El) p3El.textContent = p3 !== null ? fmtPnl(p3) : '—';
+  const pmEl = $('mdPnlMax'); if(pmEl) pmEl.textContent = fmtPnl(pMax);
+  const psEl = $('mdPnlSL');  if(psEl) psEl.textContent = fmtPnl(pSL);
+}
+
+async function executeModalTrade(){
+  const t = S.modalTrade;
+  if(!t) return;
+
+  const lev     = parseInt($('mdLevSlider').value) || 1;
+  const acc     = S.modalBalance || parseFloat($('riskAccount').value) || 110;
+  const slDist  = t.entry && t.sl ? Math.abs(t.entry - t.sl) / t.entry * 100 : 0;
+  const posSize = acc * lev;
+  const maxLoss = posSize * slDist / 100;
+
+  const ok = confirm(
+    `⚡ CONFIRM TRADE\n\n` +
+    `${t.action}  ${t.symbol}\n` +
+    `Entry:    ${t.entry?.toFixed?.(4) || '—'}\n` +
+    `SL:       ${t.sl?.toFixed?.(4) || '—'}\n` +
+    `Leverage: ${lev}x\n` +
+    `Position: $${posSize.toFixed(2)}\n` +
+    `Max loss: $${maxLoss.toFixed(2)}\n\n` +
+    `This will place a LIVE order on WEEX. Proceed?`
+  );
+  if(!ok) return;
+
+  const btn = $('mdExecBtn');
+  btn.disabled    = true;
+  btn.textContent = '⟳ Placing order...';
+
+  const signal = {
+    symbol:     t.symbol,
+    action:     t.action,
+    entry:      t.entry,
+    sl:         t.sl,
+    tp1:        t.tp1,
+    tp2:        t.tp2 || 0,
+    tp3:        t.tp3 || 0,
+    confidence: t.confidence,
+    setup_type: t.setup || '',
+    leverage:   lev,
+  };
+
+  try{
+    const url = $('backendUrl').value;
+    const res = await fetch(url + '/trade/execute', {
+      method:  'POST',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify({signal}),
+    });
+    const data = await res.json();
+
+    if(data.executed){
+      const tc = t.action === 'LONG' ? 'LONG' : 'SHORT';
+      const te = t.action === 'LONG' ? '🟢' : '🔴';
+      showToast(tc,
+        `${te} ORDER PLACED — ${t.symbol}`,
+        `${t.action} ${lev}x @ ${(t.entry||0).toFixed(4)}<br>` +
+        `SL: ${(t.sl||0).toFixed(4)} &nbsp;·&nbsp; TP1: ${(t.tp1||0).toFixed(4)}`
+      );
+      closeTradeModal();
+      setTimeout(refreshPositions, 800);
+    } else {
+      btn.disabled    = false;
+      btn.textContent = t.action === 'SHORT' ? '⬇ EXECUTE SHORT' : '⬆ EXECUTE LONG';
+      showToast('LOSS', '❌ Trade rejected', data.reason || 'Risk check failed — check RISK tab');
+    }
+  } catch(e){
+    btn.disabled    = false;
+    btn.textContent = t.action === 'SHORT' ? '⬇ EXECUTE SHORT' : '⬆ EXECUTE LONG';
+    showToast('LOSS', '❌ Error', 'Backend not reachable: ' + e.message);
+  }
 }
 
 // ── POSITIONS ─────────────────────────────────────────────────────────────────
@@ -1032,6 +1409,18 @@ function connectWebSocket(url){
           break;
         case 'signal':
           applySignal(msg.signal,true);
+          if(msg.signal&&msg.signal.action!=='WAIT'){
+            const s=msg.signal;
+            const tc=s.action==='LONG'?'LONG':'SHORT';
+            const te=s.action==='LONG'?'🟢':'🔴';
+            showToast(tc,
+              `${te} ${s.action} — ${s.symbol}`,
+              `Confidence: <b style="color:${s.action==='LONG'?'var(--green)':'var(--red)'}">${s.confidence}%</b><br>`+
+              `Entry: ${(s.entry||0).toFixed(4)} &nbsp;·&nbsp; SL: ${(s.sl||0).toFixed(4)}<br>`+
+              `TP1: ${(s.tp1||0).toFixed(4)} &nbsp;·&nbsp; R:R ${s.rr||'—'}<br>`+
+              `<span style="color:var(--textDim);font-size:9px">${(s.setup_type||'').slice(0,45)}</span>`
+            );
+          }
           break;
         case 'scan_start':
           setScanStart(msg.coins||[], msg.message||'');
@@ -1039,8 +1428,25 @@ function connectWebSocket(url){
         case 'scan_skip':
           setScanSkip(msg.symbol, msg.reason||'');
           break;
+        case 'scan_candidate':{
+          // Coin passed pre-filter — highlight in market list
+          S.scanProgress++;
+          const pct2=S.scanTotal?Math.round(S.scanProgress/S.scanTotal*100):0;
+          $('scanBarFill').style.width=pct2+'%';
+          set('scanCoin',`Candidate: ${msg.symbol} (score ${msg.pre_score||'?'}/100)`,'var(--green)');
+          const mc=S.markets.find(x=>x.id===msg.symbol);
+          if(mc){mc.scanning=true;renderMarkets();}
+          break;}
+        case 'scan_status':
+          // Phase 2 banner — Claude is being asked
+          set('scanLabel', msg.message||'Asking Claude...','var(--purple)');
+          set('scanCoin',
+            msg.candidates?(msg.candidates.slice(0,3).map(s=>s.replace('/USDT','')).join(', ')+(msg.candidates.length>3?'…':'')):'',
+            'var(--purple)');
+          break;
         case 'scan_complete':
-          setScanDone(msg.total_scanned||0, msg.signals_found||0, msg.next_scan_in||300);
+          setScanDone(msg.total_scanned||0, msg.signals_found||0, msg.next_scan_in||300,
+                      msg.candidates||0);
           break;
         case 'top_coins':
         case 'top_coins_updated':
@@ -1048,6 +1454,7 @@ function connectWebSocket(url){
           break;
         case 'balance':
           S.balance=msg.balance;
+          if(msg.balance?.USDT?.free > 0) S.modalBalance = msg.balance.USDT.free;
           updateBalanceHeader(msg.balance);
           if(msg.stats){S.stats=msg.stats;refreshStats();}
           break;
@@ -1058,14 +1465,52 @@ function connectWebSocket(url){
           setStatus('spWeex',msg.paper?'warn':'ok','WEEX'+(msg.paper?' Paper':''));
           set('st-weex',msg.paper?'Paper Mode':'Live Connected',msg.paper?'var(--gold)':'var(--green)');
           break;
-        case 'trade_opened':
+        case 'trade_opened':{
+          const ord=msg.order||{},sig2=msg.signal||{};
+          const tc2=sig2.action==='LONG'?'LONG':'SHORT';
+          const te2=sig2.action==='LONG'?'🟢':'🔴';
+          showToast(tc2,
+            `${te2} TRADE OPENED — ${sig2.symbol||ord.symbol||''}`,
+            `${sig2.action||''} ${(ord.qty||'')}&nbsp;@&nbsp;${(sig2.entry||0).toFixed(4)}<br>`+
+            `SL: ${(sig2.sl||0).toFixed(4)} &nbsp;·&nbsp; TP1: ${(sig2.tp1||0).toFixed(4)}`
+          );
           refreshPositions();
           if(S.activeTab===1)renderPositions();
-          break;
-        case 'position_event':
+          break;}
+        case 'position_event':{
+          const pnl2=msg.pnl||0;
+          showToast(pnl2>=0?'WIN':'LOSS',
+            `${pnl2>=0?'✅':'❌'} ${(msg.event||'').replace('_',' ')} — ${msg.symbol||''}`,
+            `PnL: <b style="color:${pnl2>=0?'var(--green)':'var(--red)'}">${pnl2>=0?'+':''}$${pnl2.toFixed(2)} USDT</b>`
+          );
           refreshPositions();
           if(S.activeTab===2)refreshStats();
+          break;}
+        case 'tp1_hit':
+          showToast('WIN','✅ TP1 HIT — '+(msg.symbol||''),
+            `Partial PnL: <b style="color:var(--green)">+$${(msg.pnl||0).toFixed(2)}</b><br>SL moved to breakeven`);
+          refreshPositions();
           break;
+        case 'tp2_hit':
+          showToast('WIN','✅ TP2 HIT — '+(msg.symbol||''),
+            `Partial PnL: <b style="color:var(--green)">+$${(msg.pnl||0).toFixed(2)}</b><br>SL trailed to TP1`);
+          refreshPositions();
+          break;
+        case 'tp3_hit':
+          showToast('WIN','🏆 TP3 HIT — '+(msg.symbol||''),
+            `Runner PnL: <b style="color:var(--cyan)">+$${(msg.pnl||0).toFixed(2)}</b><br>Trade fully closed!`, 12000);
+          refreshPositions();
+          break;
+        case 'trade_closed':{
+          const cp=msg.pnl||0;
+          showToast(cp>=0?'WIN':'LOSS',
+            `${cp>=0?'✅':'❌'} CLOSED — ${msg.symbol||''}`,
+            `Reason: ${(msg.reason||'').replace('_',' ')}<br>`+
+            `PnL: <b style="color:${cp>=0?'var(--green)':'var(--red)'}">${cp>=0?'+':''}$${cp.toFixed(2)} USDT</b>`
+          );
+          refreshPositions();
+          if(S.activeTab===2)refreshStats();
+          break;}
         case 'trade_skipped':
           set('scanCoin','Skipped '+msg.symbol+': '+msg.reason,'var(--textDim)');
           break;

@@ -4,6 +4,8 @@ import pandas_ta_classic as ta
 import requests
 import time
 import xml.etree.ElementTree as ET
+from scipy.signal import find_peaks
+from utils import with_retry
 
 class DataFeed:
 
@@ -70,8 +72,8 @@ class DataFeed:
     # ─────────────────────────────────────────────────────────────────────
     # OHLCV + INDICATORS
     # ─────────────────────────────────────────────────────────────────────
-    def get_ohlcv(self, symbol: str, timeframe: str = '1h', limit: int = 250) -> pd.DataFrame:
-        raw = self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+    def get_ohlcv(self, symbol: str, timeframe: str = '1h', limit: int = 350) -> pd.DataFrame:
+        raw = with_retry(lambda: self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit))
         df = pd.DataFrame(raw, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         df.set_index('timestamp', inplace=True)
@@ -81,7 +83,7 @@ class DataFeed:
         df['ema20']  = ta.ema(df['close'], length=20)
         df['ema50']  = ta.ema(df['close'], length=50)
         ema200       = ta.ema(df['close'], length=200)
-        df['ema200'] = ema200 if ema200 is not None else df['ema50']
+        df['ema200'] = ema200 if ema200 is not None else float('nan')
         df['rsi']    = ta.rsi(df['close'], length=14)
         df['atr']    = ta.atr(df['high'], df['low'], df['close'], length=14)
 
@@ -209,23 +211,30 @@ class DataFeed:
     # RSI DIVERGENCE
     # ─────────────────────────────────────────────────────────────────────
     def detect_rsi_divergence(self, df: pd.DataFrame) -> str:
-        if len(df) < 5:
+        """Proper pivot-based RSI divergence using scipy.signal.find_peaks."""
+        if len(df) < 30:
             return 'NONE'
-        recent = df.tail(20)
-        price_high_idx = recent['close'].idxmax()
-        price_low_idx  = recent['close'].idxmin()
-        prev = recent.iloc[:-5]
-        if prev.empty:
-            return 'NONE'
-        prev_high_idx = prev['close'].idxmax()
-        prev_low_idx  = prev['close'].idxmin()
         try:
-            if (recent.loc[price_high_idx, 'close'] > recent.loc[prev_high_idx, 'close'] and
-                    recent.loc[price_high_idx, 'rsi']   < recent.loc[prev_high_idx, 'rsi']):
-                return 'BEARISH DIVERGENCE — price up, RSI down, reversal likely'
-            if (recent.loc[price_low_idx, 'close'] < recent.loc[prev_low_idx, 'close'] and
-                    recent.loc[price_low_idx, 'rsi']  > recent.loc[prev_low_idx, 'rsi']):
-                return 'BULLISH DIVERGENCE — price down, RSI up, reversal likely'
+            recent = df.tail(50).copy()
+            prices = recent['close'].values
+            rsi    = recent['rsi'].fillna(50).values
+
+            price_highs, _ = find_peaks(prices,  prominence=0, distance=5)
+            price_lows,  _ = find_peaks(-prices, prominence=0, distance=5)
+            rsi_highs,   _ = find_peaks(rsi,     prominence=0, distance=5)
+            rsi_lows,    _ = find_peaks(-rsi,    prominence=0, distance=5)
+
+            if len(price_highs) >= 2 and len(rsi_highs) >= 2:
+                ph1, ph2 = price_highs[-2], price_highs[-1]
+                rh1, rh2 = rsi_highs[-2],   rsi_highs[-1]
+                if prices[ph2] > prices[ph1] and rsi[rh2] < rsi[rh1]:
+                    return 'BEARISH DIVERGENCE — price up, RSI down, reversal likely'
+
+            if len(price_lows) >= 2 and len(rsi_lows) >= 2:
+                pl1, pl2 = price_lows[-2], price_lows[-1]
+                rl1, rl2 = rsi_lows[-2],   rsi_lows[-1]
+                if prices[pl2] < prices[pl1] and rsi[rl2] > rsi[rl1]:
+                    return 'BULLISH DIVERGENCE — price down, RSI up, reversal likely'
         except Exception:
             pass
         return 'NONE'
@@ -240,6 +249,7 @@ class DataFeed:
         return {'bsl': bsl, 'ssl': ssl}
 
     def find_order_blocks(self, df: pd.DataFrame) -> list:
+        """Detect order blocks with mitigation check and respect_count."""
         obs = []
         for i in range(5, len(df) - 3):
             candle    = df.iloc[i]
@@ -248,22 +258,77 @@ class DataFeed:
                 next3 = df.iloc[i + 1:i + 4]
                 move  = (next3['close'].iloc[-1] - candle['close']) / candle['close']
                 if abs(move) > 0.008:
-                    obs.append({
-                        'price': float(candle['open']),
-                        'type':  'bullish' if candle['close'] > candle['open'] else 'bearish',
-                        'time':  str(df.index[i])
-                    })
+                    ob_price = float(candle['open'])
+                    ob_type  = 'bullish' if candle['close'] > candle['open'] else 'bearish'
+
+                    # Check mitigation on subsequent candles after OB formation
+                    subsequent  = df.iloc[i + 4:]
+                    mitigated   = False
+                    respect_count = 0
+                    for _, sc in subsequent.iterrows():
+                        if ob_type == 'bullish':
+                            if sc['close'] < ob_price:
+                                mitigated = True
+                                break
+                            if sc['low'] <= ob_price * 1.005:
+                                respect_count += 1
+                        else:
+                            if sc['close'] > ob_price:
+                                mitigated = True
+                                break
+                            if sc['high'] >= ob_price * 0.995:
+                                respect_count += 1
+
+                    if not mitigated:
+                        obs.append({
+                            'price':         ob_price,
+                            'type':          ob_type,
+                            'time':          str(df.index[i]),
+                            'mitigated':     False,
+                            'respect_count': respect_count,
+                        })
         return obs[-3:]
 
     def find_fvgs(self, df: pd.DataFrame) -> list:
+        """Detect Fair Value Gaps with fill and partial-fill detection."""
         fvgs = []
         for i in range(1, len(df) - 1):
             prev = df.iloc[i - 1]
             nxt  = df.iloc[i + 1]
+            subsequent = df.iloc[i + 2:]
+
             if nxt['low'] > prev['high']:
-                fvgs.append({'type': 'bull', 'top': float(nxt['low']), 'bot': float(prev['high'])})
+                top      = float(nxt['low'])
+                bot      = float(prev['high'])
+                gap_size = top - bot
+                filled   = False
+                max_fill = 0.0
+                for _, sc in subsequent.iterrows():
+                    if sc['close'] <= bot:
+                        filled = True
+                        break
+                    fill_down = top - max(float(sc['low']), bot)
+                    max_fill  = max(max_fill, min(fill_down / gap_size * 100, 100) if gap_size > 0 else 0)
+                if not filled:
+                    fvgs.append({'type': 'bull', 'top': top, 'bot': bot,
+                                 'filled': False, 'partial_fill_pct': round(max_fill, 1)})
+
             if nxt['high'] < prev['low']:
-                fvgs.append({'type': 'bear', 'top': float(prev['low']), 'bot': float(nxt['high'])})
+                top      = float(prev['low'])
+                bot      = float(nxt['high'])
+                gap_size = top - bot
+                filled   = False
+                max_fill = 0.0
+                for _, sc in subsequent.iterrows():
+                    if sc['close'] >= top:
+                        filled = True
+                        break
+                    fill_up  = min(float(sc['high']), top) - bot
+                    max_fill = max(max_fill, min(fill_up / gap_size * 100, 100) if gap_size > 0 else 0)
+                if not filled:
+                    fvgs.append({'type': 'bear', 'top': top, 'bot': bot,
+                                 'filled': False, 'partial_fill_pct': round(max_fill, 1)})
+
         return fvgs[-4:]
 
     def market_structure(self, df: pd.DataFrame) -> str:
@@ -553,7 +618,7 @@ class DataFeed:
         if now - self._fng_cache['ts'] < 300:
             return self._fng_cache
         try:
-            r    = requests.get('https://api.alternative.me/fng/?limit=1', timeout=5)
+            r    = with_retry(lambda: requests.get('https://api.alternative.me/fng/?limit=1', timeout=5))
             data = r.json()['data'][0]
             val  = int(data['value'])
             label = data['value_classification']
@@ -569,7 +634,7 @@ class DataFeed:
         biases = {}
         for tf in ['15m', '1h', '4h']:
             try:
-                limit = 100 if tf == '4h' else 150
+                limit = 350
                 df = self.get_ohlcv(symbol, tf, limit=limit)
                 df = self.add_indicators(df)
                 df = df.dropna(subset=['ema20', 'ema50', 'rsi'])
@@ -597,7 +662,7 @@ class DataFeed:
     # FULL ANALYSIS (main entry point)
     # ─────────────────────────────────────────────────────────────────────
     def get_full_analysis(self, symbol: str, timeframe: str = '1h') -> dict:
-        df = self.get_ohlcv(symbol, timeframe, limit=250)
+        df = self.get_ohlcv(symbol, timeframe, limit=350)
         df = self.add_indicators(df)
         df = df.dropna(subset=['ema20', 'ema50', 'rsi', 'atr', 'macd'])
         if df.empty:
@@ -630,7 +695,7 @@ class DataFeed:
             'atr':            round(float(last['atr']), 6),
             'ema20':          round(float(last['ema20']), 6),
             'ema50':          round(float(last['ema50']), 6),
-            'ema200':         round(float(last['ema200']), 6),
+            'ema200':         None if pd.isna(last['ema200']) else round(float(last['ema200']), 6),
             'bb_upper':       round(float(last['bb_upper']), 6),
             'bb_lower':       round(float(last['bb_lower']), 6),
             'volume':         float(last['volume']),

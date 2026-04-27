@@ -30,3 +30,41 @@
 2026-04-24 14:46:43 | ATTEMPT | BNB/USDT | SHORT | conf:80 | R:R 1.38 below minimum 3.0
 2026-04-24 14:47:27 | SIGNAL | SHORT | EUR/USDT | conf:75% | Bearish FVG Fill + SSL Target (No OB — reduced confidence)
 2026-04-24 14:47:28 | ATTEMPT | EUR/USDT | SHORT | conf:75 | R:R 1.83 below minimum 3.0
+2026-04-25 14:48:42 | SIGNAL | LONG | DYDX/USDT | conf:74% | Bullish OB+FVG continuation in trending bull
+2026-04-25 14:48:53 | ATTEMPT | DYDX/USDT | LONG | conf:74 | R:R 1.47 below minimum 3.0
+2026-04-25 15:25:58 | SIGNAL | LONG | SAND/USDT | conf:72% | BOS_BULLISH + FVG_Retest + EMA_Stack
+2026-04-25 15:25:58 | ATTEMPT | SAND/USDT | LONG | conf:72 | R:R 2.10 below minimum 3.0
+2026-04-26 00:52:31 | SIGNAL | LONG | HYPER/USDT | conf:74% | Bullish Engulfing + Trend Continuation + Funding Squeeze
+2026-04-26 00:52:31 | ATTEMPT | HYPER/USDT | LONG | conf:74 | R:R 2.08 below minimum 3.0
+2026-04-26 00:52:31 | SIGNAL | LONG | ZBT/USDT | conf:72% | Trending Bull + Bullish OB Stack + EMA Alignment
+2026-04-26 00:52:31 | ATTEMPT | ZBT/USDT | LONG | conf:72 | R:R 2.08 below minimum 3.0
+2026-04-26 00:58:29 | SIGNAL | SHORT | ETH/USDT | conf:74% | BOS Bearish + Bearish OB Mitigation + EMA Stack Bear
+2026-04-26 00:58:29 | ATTEMPT | ETH/USDT | SHORT | conf:74 | OK
+2026-04-26 16:48:18 | SIGNAL | LONG | DOGE/USDT | conf:78% | CHoCH_BULLISH + OB Respect + FVG Magnet
+2026-04-26 16:48:18 | ATTEMPT | DOGE/USDT | LONG | conf:78 | R:R 2.05 below minimum 3.0
+2026-04-26 16:48:18 | SIGNAL | LONG | PENGU/USDT | conf:74% | Trend Continuation + Unfilled FVG + VERY HIGH Volume
+2026-04-26 16:48:18 | ATTEMPT | PENGU/USDT | LONG | conf:74 | R:R 1.68 below minimum 3.0
+2026-04-26 16:54:43 | SIGNAL | LONG | DOGE/USDT | conf:78% | CHoCH Bullish + OB Confluence + Liquidity Sweep
+2026-04-26 16:54:43 | ATTEMPT | DOGE/USDT | LONG | conf:78 | R:R 2.49 below minimum 3.0
+2026-04-26 16:54:43 | SIGNAL | SHORT | CHIP/USDT | conf:74% | Trending Bear + Bearish OB Confluence + VERY HIGH Volume
+2026-04-26 16:54:43 | ATTEMPT | CHIP/USDT | SHORT | conf:74 | R:R 2.53 below minimum 3.0
+2026-04-26 17:01:09 | SIGNAL | LONG | D/USDT | conf:74% | Bullish OB Retest + Trending Bull Structure
+2026-04-26 17:01:09 | ATTEMPT | D/USDT | LONG | conf:74 | R:R 2.04 below minimum 3.0
+2026-04-26 17:22:29 | ATTEMPT | DOGE/USDT | LONG | conf:74 | R:R 1.10 below minimum 3.0
+2026-04-26 17:23:19 | SIGNAL | LONG | DOGE/USDT | conf:78% | BOS_BULLISH + Unfilled FVG Stack + EMA Confluence
+2026-04-26 17:23:19 | ATTEMPT | DOGE/USDT | LONG | conf:78 | R:R 1.05 below minimum 3.0
+2026-04-26 17:23:19 | SIGNAL | LONG | HIGH/USDT | conf:72% | BOS_BULLISH + Negative Funding Squeeze + Bullish FVG 0.2060-0.2460
+2026-04-26 17:23:19 | ATTEMPT | HIGH/USDT | LONG | conf:72 | R:R 2.09 below minimum 3.0
+2026-04-27 02:37:54 | SIGNAL | LONG | ETH/USDT | conf:74% | BOS_BULLISH + OB+FVG stack + trending bull regime
+2026-04-27 02:37:54 | ATTEMPT | ETH/USDT | LONG | conf:74 | R:R 1.00 below minimum 3.0
+2026-04-27 02:44:04 | SIGNAL | LONG | ETH/USDT | conf:74% | BOS_BULLISH + OB confluence + FVG magnet
+2026-04-27 02:44:04 | ATTEMPT | ETH/USDT | LONG | conf:74 | OK
+2026-04-27 02:44:07 | SIGNAL | LONG | ZEC/USDT | conf:72% | OB stack + FVG partial fill + bullish trend continuation
+2026-04-27 02:44:07 | ATTEMPT | ZEC/USDT | LONG | conf:72 | OK
+2026-04-27 03:33:56 | SIGNAL | LONG | BTC/USDT | conf:78% | BOS Retest + FVG Confluence Long
+2026-04-27 03:33:56 | ATTEMPT | BTC/USDT | LONG | conf:78 | R:R 1.00 below minimum 3.0
+2026-04-27 08:18:41 | SIGNAL | LONG | ZEC/USDT | conf:76% | BOS Bullish + Bearish OB Resistance Watch
+2026-04-27 08:18:41 | ATTEMPT | ZEC/USDT | LONG | conf:76 | R:R 2.08 below minimum 3.0
+2026-04-27 08:18:58 | ATTEMPT | ZEC/USDT | LONG | conf:76 | R:R 2.08 below minimum 3.0
+2026-04-27 08:24:47 | SIGNAL | LONG | ZEC/USDT | conf:82% | BOS Bullish Continuation + EMA Stack
+2026-04-27 08:24:47 | ATTEMPT | ZEC/USDT | LONG | conf:82 | R:R 2.08 below minimum 3.0

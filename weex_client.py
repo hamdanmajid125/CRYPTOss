@@ -1,7 +1,9 @@
 import ccxt
 import time
-import os
+import uuid
+import json
 from typing import Optional, List, Dict
+from utils import with_retry
 
 
 class WeexClient:
@@ -17,9 +19,9 @@ class WeexClient:
         self._public = ccxt.binance({'enableRateLimit': True, 'options': {'defaultType': 'spot'}})
 
         # Paper trading state
-        self._paper_balance = float(os.getenv('ACCOUNT_USDT', '10000'))
+        self._paper_balance = 10000.0  # paper-mode simulated balance
         self._paper_positions: List[Dict] = []
-        self._paper_order_id = 1000
+        # order IDs now use uuid.hex[:8] — no counter needed
 
         print(f'[WEEX] Initialized — paper={paper}')
 
@@ -107,8 +109,7 @@ class WeexClient:
     def _paper_place_order(self, symbol: str, side: str, qty: float,
                            entry: float, sl: float, tp1: float,
                            tp2: float = 0, tp3: float = 0) -> Dict:
-        order_id = f'paper_{self._paper_order_id}'
-        self._paper_order_id += 1
+        order_id = f'paper_{uuid.uuid4().hex[:8]}'
 
         # 50% at TP1, 30% at TP2, 20% runner
         qty_tp1 = round(qty * 0.50, 6)
@@ -142,7 +143,21 @@ class WeexClient:
         }
         self._paper_positions.append(position)
 
-        print(f'[PAPER] {side} {qty} {symbol} @ {entry} | SL:{sl} TP1:{tp1} TP2:{position["tp2"]} TP3:{position["tp3"]}')
+        print(f'[PAPER] {side} {qty} {symbol} @ {entry} | SL:{sl} TP1:{tp1} TP2:{position["tp2"]} TP3:{position["tp3"]} id:{order_id}')
+
+        # JSON record to paper_trades.log
+        try:
+            record = {
+                'id': order_id, 'symbol': symbol, 'side': side,
+                'qty': qty, 'entry': entry, 'sl': sl,
+                'tp1': tp1, 'tp2': position['tp2'], 'tp3': position['tp3'],
+                'time': time.strftime('%Y-%m-%d %H:%M:%S'),
+            }
+            with open('paper_trades.log', 'a') as f:
+                f.write(json.dumps(record) + '\n')
+        except Exception:
+            pass
+
         return {
             'id': order_id,
             'status': 'paper_filled',
@@ -186,13 +201,13 @@ class WeexClient:
             ccxt_side = 'buy' if side == 'LONG' else 'sell'
             limit_price = round(live_price * 0.9995 if side == 'LONG' else live_price * 1.0005, 2)
 
-            order = self.exchange.create_order(
+            order = with_retry(lambda: self.exchange.create_order(
                 symbol=symbol,
                 type='limit',
                 side=ccxt_side,
                 amount=qty,
                 price=limit_price,
-            )
+            ))
 
             # Place SL as stop-market immediately
             try:

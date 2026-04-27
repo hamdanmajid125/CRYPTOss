@@ -13,12 +13,28 @@ load_dotenv()
 
 @asynccontextmanager
 async def lifespan(__: FastAPI):
-    # Start all background tasks on boot — no manual scan button needed
-    asyncio.create_task(bg_auto_scanner())       # 🔥 NEW: auto-scans top coins
+    # Seed RiskManager with live WEEX balance before any task starts
+    try:
+        bal       = weex.get_balance()
+        usdt      = bal.get('USDT') or {}
+        live_bal  = usdt.get('free', 0) or usdt.get('total', 0)
+        if live_bal > 0:
+            risk.settings.account_usdt = live_bal
+            risk.current_balance       = live_bal
+            if risk.peak_balance < live_bal:
+                risk.peak_balance = live_bal
+            print(f'[Startup] WEEX live balance: ${live_bal:.2f} USDT')
+        else:
+            print('[Startup] WEEX balance returned 0 — risk sizing may be off')
+    except Exception as e:
+        print(f'[Startup] Balance fetch failed: {e}')
+
+    asyncio.create_task(bg_auto_scanner())
     asyncio.create_task(bg_position_monitor())
     asyncio.create_task(bg_balance_broadcast())
     asyncio.create_task(bg_fng_update())
-    asyncio.create_task(bg_top_coins_refresh())  # 🔥 NEW: refreshes coin list
+    asyncio.create_task(bg_top_coins_refresh())
+    asyncio.create_task(trade_manager.monitor_loop(broadcast))
     yield
 
 from data_feed import DataFeed
@@ -29,6 +45,7 @@ from telegram_notifier import TelegramNotifier
 from news_watcher import NewsWatcher
 from trade_journal import TradeJournal
 from pump_scanner import PumpScanner
+from trade_manager import TradeManager
 import ccxt
 
 app = FastAPI(title='AI Trade Terminal', version='3.0.0', lifespan=lifespan)
@@ -38,13 +55,17 @@ app.add_middleware(CORSMiddleware, allow_origins=['*'],
 # ── Config ─────────────────────────────────────────────────────────────────────
 PAPER       = os.getenv('PAPER_TRADING', 'true').lower() == 'true'
 AUTO_TRADE  = os.getenv('AUTO_TRADE', 'false').lower() == 'true'
-ACCOUNT_USDT = float(os.getenv('ACCOUNT_USDT', '500'))
+# Account balance is fetched live from WEEX on startup — no env var needed
 
 # How many top coins to scan (set 10 or 20 in .env)
 TOP_N_COINS  = int(os.getenv('TOP_N_COINS', '20'))
 
 # How often to run the auto-scan loop (default: every 5 minutes)
 SCAN_INTERVAL = int(os.getenv('SCAN_INTERVAL_SECONDS', '300'))
+
+# Batch mode settings — max candidates sent to Claude, min pre-score to qualify
+BATCH_SIZE          = int(os.getenv('BATCH_SIZE', '5'))
+PRE_SCORE_THRESHOLD = int(os.getenv('PRE_SCORE_THRESHOLD', '55'))
 
 public_exchange = ccxt.binance({'options': {'defaultType': 'spot'}, 'enableRateLimit': True})
 
@@ -55,7 +76,7 @@ notifier = TelegramNotifier(
     chat_id = os.getenv('TELEGRAM_CHAT_ID', ''),
 )
 risk   = RiskManager(RiskSettings(
-    account_usdt    = ACCOUNT_USDT,
+    account_usdt    = 0.0,  # seeded from live WEEX balance in lifespan startup
     risk_pct        = float(os.getenv('RISK_PCT', '1.5')),
     max_trade_usdt  = float(os.getenv('MAX_TRADE_USDT', '75')),
     min_confidence  = int(os.getenv('MIN_CONFIDENCE', '75')),
@@ -68,9 +89,10 @@ weex = WeexClient(
     passphrase = os.getenv('WEEX_PASSPHRASE', ''),
     paper      = PAPER,
 )
-news_watcher  = NewsWatcher(blackout_minutes=int(os.getenv('NEWS_BLACKOUT_MIN', '30')))
-journal       = TradeJournal()
-pump_scanner  = PumpScanner(public_exchange)
+news_watcher   = NewsWatcher(blackout_minutes=int(os.getenv('NEWS_BLACKOUT_MIN', '30')))
+journal        = TradeJournal()
+pump_scanner   = PumpScanner(public_exchange)
+trade_manager  = TradeManager(weex, risk, notifier)
 
 # ── WebSocket registry ─────────────────────────────────────────────────────────
 clients: List[WebSocket] = []
@@ -95,121 +117,132 @@ def log_trade(line: str):
 
 async def bg_auto_scanner():
     """
-    🔥 THE MAIN ENGINE — runs automatically every SCAN_INTERVAL seconds.
-    No manual button needed. Fetches top coins by volume, analyzes each,
-    sends signals to dashboard in real-time, and executes if AUTO_TRADE=true.
-    """
-    print(f'[AutoScanner] Starting — will scan top {TOP_N_COINS} coins every {SCAN_INTERVAL}s')
+    BATCH MODE ENGINE — 2 phases per scan cycle:
+      Phase 1: Collect data for all coins (no Claude), pre-score with _score_confidence().
+      Phase 2: ONE Claude batch call for the top BATCH_SIZE candidates.
 
-    # Small initial delay to let server boot fully
+    Token cost: was N calls/scan → now always 1 call/scan regardless of coin count.
+    """
+    print(f'[AutoScanner] Batch mode — top {TOP_N_COINS} coins, '
+          f'max {BATCH_SIZE} to Claude, threshold {PRE_SCORE_THRESHOLD}/100')
     await asyncio.sleep(15)
 
     while True:
         try:
-            # Step 1: Get top coins — merge volume list with pump scanner hits
-            top_coins   = feed.get_top_coins_by_volume(top_n=TOP_N_COINS)
-            pump_coins  = pump_scanner.get_pump_symbols()
-            # Insert pump coins at front (deduplicated) so they get analysed first
-            seen = set()
-            merged = []
+            # ── Build coin list ──────────────────────────────────────────────
+            top_coins  = feed.get_top_coins_by_volume(top_n=TOP_N_COINS)
+            pump_coins = pump_scanner.get_pump_symbols()
+            seen, merged = set(), []
             for c in (pump_coins + top_coins):
                 if c not in seen:
                     seen.add(c)
                     merged.append(c)
             top_coins = merged[:TOP_N_COINS + len(pump_coins)]
             if pump_coins:
-                print(f'[PumpScanner] Prioritising {len(pump_coins)} pumping coins: {pump_coins[:5]}')
+                print(f'[PumpScanner] Prioritising {len(pump_coins)}: {pump_coins[:5]}')
 
-            print(f'[AutoScanner] Scanning {len(top_coins)} coins: {top_coins}')
+            print(f'[AutoScanner] Phase 1 — data collection for {len(top_coins)} coins (no Claude)')
             await broadcast({
-                'type': 'scan_start',
-                'coins': top_coins,
-                'count': len(top_coins),
-                'message': f'Auto-scanning top {len(top_coins)} coins by volume...'
+                'type': 'scan_start', 'coins': top_coins, 'count': len(top_coins),
+                'message': f'Phase 1: collecting data for {len(top_coins)} coins (no AI yet)...',
             })
 
-            signals_found = []
-
+            # ── Phase 1: data collection + pre-scoring — ZERO Claude calls ──
+            candidates: List[Dict] = []
             for symbol in top_coins:
                 try:
-                    # Step 2: Get full technical analysis
-                    data = feed.get_full_analysis(symbol, '1h')
-
-                    # Step 3: Quick pre-filter — skip if TF is MIXED (saves Claude API calls)
+                    data       = feed.get_full_analysis(symbol, '1h')
                     tf_overall = data.get('timeframe_bias', {}).get('overall', 'MIXED')
                     vol_signal = data.get('volume_signal', 'NORMAL')
 
                     if tf_overall == 'MIXED':
-                        print(f'[AutoScanner] {symbol} — SKIP (mixed TF bias)')
-                        await broadcast({
-                            'type':   'scan_skip',
-                            'symbol': symbol,
-                            'reason': 'Mixed timeframe bias — no clear direction'
-                        })
-                        await asyncio.sleep(0.5)  # small delay between symbols
+                        await broadcast({'type': 'scan_skip', 'symbol': symbol,
+                                         'reason': 'Mixed TF bias'})
+                        await asyncio.sleep(0.3)
                         continue
-
                     if 'VERY LOW' in vol_signal:
-                        print(f'[AutoScanner] {symbol} — SKIP (very low volume)')
-                        await broadcast({
-                            'type':   'scan_skip',
-                            'symbol': symbol,
-                            'reason': 'Very low volume — not safe to trade'
-                        })
-                        await asyncio.sleep(0.5)
+                        await broadcast({'type': 'scan_skip', 'symbol': symbol,
+                                         'reason': 'Very low volume'})
+                        await asyncio.sleep(0.3)
                         continue
 
-                    # Step 4: Ask Claude AI for trading signal
-                    print(f'[AutoScanner] {symbol} — Asking Claude (TF={tf_overall}, vol={vol_signal})')
-                    signal = claude.get_signal(data)
+                    pre_score = claude._score_confidence(
+                        data, data['timeframe_bias'], data['fear_greed'])
+                    data['pre_score'] = pre_score
 
-                    if signal:
-                        action = signal.get('action', 'WAIT')
-                        conf   = signal.get('confidence', 0)
+                    if pre_score < PRE_SCORE_THRESHOLD:
+                        await broadcast({'type': 'scan_skip', 'symbol': symbol,
+                                         'reason': f'Low pre-score ({pre_score}/100)'})
+                        await asyncio.sleep(0.2)
+                        continue
 
-                        # Broadcast every signal (LONG, SHORT, or WAIT) to dashboard
-                        await broadcast({
-                            'type':   'signal',
-                            'symbol': symbol,
-                            'signal': signal
-                        })
-
-                        if action in ('LONG', 'SHORT'):
-                            log_trade(f"SIGNAL | {action} | {symbol} | conf:{conf}% | {signal.get('setup_type','')}")
-                            signals_found.append(signal)
-                            notifier.send_signal(signal)
-
-                            # Step 5: Execute if AUTO_TRADE is enabled
-                            if AUTO_TRADE:
-                                await maybe_execute(signal)
-                        else:
-                            print(f'[AutoScanner] {symbol} — WAIT (conf:{conf}%)')
-
-                    # Delay between coins to avoid rate limiting
-                    await asyncio.sleep(2)
+                    candidates.append(data)
+                    await broadcast({'type': 'scan_candidate', 'symbol': symbol,
+                                     'pre_score': pre_score})
+                    print(f'[AutoScanner] {symbol} — candidate (pre-score={pre_score})')
+                    await asyncio.sleep(0.5)
 
                 except Exception as e:
-                    print(f'[AutoScanner] Error on {symbol}: {e}')
-                    await asyncio.sleep(1)
-                    continue
+                    print(f'[AutoScanner] Data error {symbol}: {e}')
+                    await asyncio.sleep(0.3)
 
-            # Broadcast scan summary
+            # Sort by pre-score, limit to BATCH_SIZE
+            candidates.sort(key=lambda x: x.get('pre_score', 0), reverse=True)
+            batch = candidates[:BATCH_SIZE]
+
+            # ── Phase 2: ONE Claude batch call ───────────────────────────────
+            signals_found: List[Dict] = []
+
+            if batch:
+                syms = [d['symbol'] for d in batch]
+                print(f'[AutoScanner] Phase 2 — 1 Claude call for {len(batch)} candidates: {syms}')
+                await broadcast({
+                    'type': 'scan_status',
+                    'message': (f'Phase 2: 1 Claude call for top {len(batch)} setups '
+                                f'({len(top_coins)-len(batch)} pre-filtered)...'),
+                    'candidates': syms,
+                })
+
+                signals = claude.get_batch_signals(batch)
+
+                for signal in signals:
+                    sym    = signal.get('symbol', '')
+                    action = signal.get('action', 'WAIT')
+                    conf   = signal.get('confidence', 0)
+
+                    await broadcast({'type': 'signal', 'symbol': sym, 'signal': signal})
+
+                    if action in ('LONG', 'SHORT'):
+                        log_trade(f"SIGNAL | {action} | {sym} | conf:{conf}% | {signal.get('setup_type','')}")
+                        signals_found.append(signal)
+                        notifier.send_signal(signal)
+                        if AUTO_TRADE:
+                            await maybe_execute(signal)
+                    else:
+                        print(f'[AutoScanner] {sym} — WAIT (conf:{conf}%)')
+
+            else:
+                print('[AutoScanner] No candidates passed pre-filter — Claude skipped entirely')
+
+            saved_calls = max(0, len(batch) - 1)
             await broadcast({
                 'type':          'scan_complete',
                 'total_scanned': len(top_coins),
+                'candidates':    len(batch),
                 'signals_found': len(signals_found),
                 'next_scan_in':  SCAN_INTERVAL,
-                'message':       f'Scan done. {len(signals_found)} signal(s) found. Next scan in {SCAN_INTERVAL//60}min.'
+                'message': (f'Done — {len(top_coins)} scanned → {len(batch)} to Claude '
+                            f'(1 call, saved {saved_calls}) → {len(signals_found)} signal(s). '
+                            f'Next in {SCAN_INTERVAL//60}min.'),
             })
             notifier.send_scan_summary(len(top_coins), len(signals_found), SCAN_INTERVAL)
-
-            print(f'[AutoScanner] Done. {len(signals_found)} signals found. Sleeping {SCAN_INTERVAL}s...')
+            print(f'[AutoScanner] Done. 1 Claude call, {len(signals_found)} signals. '
+                  f'Sleeping {SCAN_INTERVAL}s...')
 
         except Exception as e:
             print(f'[AutoScanner] Critical error: {e}')
-            await asyncio.sleep(60)  # Wait 1 min on error
+            await asyncio.sleep(60)
 
-        # Wait before next full scan cycle
         await asyncio.sleep(SCAN_INTERVAL)
 
 
@@ -239,11 +272,18 @@ async def bg_position_monitor():
 
 
 async def bg_balance_broadcast():
-    """Every 30s: broadcast live balance."""
+    """Every 30s: fetch live WEEX balance, sync to RiskManager, broadcast."""
     while True:
         await asyncio.sleep(30)
         try:
-            bal   = weex.get_balance()
+            bal  = weex.get_balance()
+            usdt = bal.get('USDT') or {}
+            free = usdt.get('free', 0)
+            if free > 0:
+                risk.settings.account_usdt = free
+                risk.current_balance       = free
+                if risk.peak_balance < free:
+                    risk.peak_balance = free
             stats = risk.get_stats()
             await broadcast({'type': 'balance', 'balance': bal, 'stats': stats})
         except Exception as e:
@@ -303,6 +343,10 @@ async def maybe_execute(signal: Dict):
             risk.record_open(order_id, signal)
             journal.log_trade_open(sig_id, order_id, signal['symbol'],
                                    signal['action'], qty, entry, sl, tp1, paper=PAPER)
+            trade_manager.register({
+                'id': order_id, 'symbol': signal['symbol'], 'side': signal['action'],
+                'entry': entry, 'sl': sl, 'tp1': tp1, 'tp2': tp2, 'tp3': tp3, 'qty': qty,
+            })
             await broadcast({'type': 'trade_opened', 'order': result, 'signal': signal})
             log_trade(f"OPENED | {signal['action']} {qty} {signal['symbol']} @ {entry} | SL:{sl} TP1:{tp1} | id:{order_id}")
             notifier.send_trade_opened(signal['symbol'], signal['action'], qty, entry, sl, tp1)
@@ -364,15 +408,15 @@ async def get_positions():
 
 @app.post('/scan')
 async def scan_now(background_tasks: BackgroundTasks):
-    """Trigger an immediate scan cycle (called by dashboard Scan All button)."""
+    """Trigger an immediate batch scan (same two-phase logic as auto-scanner)."""
     async def _run():
         top_coins = feed.get_top_coins_by_volume(top_n=TOP_N_COINS)
         await broadcast({'type': 'scan_start', 'coins': top_coins, 'count': len(top_coins),
-                         'message': f'Manual scan — {len(top_coins)} coins'})
-        signals_found = []
+                         'message': f'Manual scan — Phase 1: collecting data ({len(top_coins)} coins)...'})
+        candidates: List[Dict] = []
         for symbol in top_coins:
             try:
-                data = feed.get_full_analysis(symbol, '1h')
+                data       = feed.get_full_analysis(symbol, '1h')
                 tf_overall = data.get('timeframe_bias', {}).get('overall', 'MIXED')
                 vol_signal = data.get('volume_signal', 'NORMAL')
                 if tf_overall == 'MIXED' or 'VERY LOW' in vol_signal:
@@ -380,22 +424,43 @@ async def scan_now(background_tasks: BackgroundTasks):
                                      'reason': 'Mixed TF or very low volume'})
                     await asyncio.sleep(0.3)
                     continue
-                signal = claude.get_signal(data)
-                if signal:
-                    await broadcast({'type': 'signal', 'symbol': symbol, 'signal': signal})
-                    if signal.get('action') in ('LONG', 'SHORT'):
-                        signals_found.append(signal)
-                        notifier.send_signal(signal)
-                        if AUTO_TRADE:
-                            await maybe_execute(signal)
-                await asyncio.sleep(1)
+                pre_score = claude._score_confidence(data, data['timeframe_bias'], data['fear_greed'])
+                data['pre_score'] = pre_score
+                if pre_score < PRE_SCORE_THRESHOLD:
+                    await broadcast({'type': 'scan_skip', 'symbol': symbol,
+                                     'reason': f'Low pre-score ({pre_score}/100)'})
+                    await asyncio.sleep(0.2)
+                    continue
+                candidates.append(data)
+                await broadcast({'type': 'scan_candidate', 'symbol': symbol, 'pre_score': pre_score})
+                await asyncio.sleep(0.4)
             except Exception as e:
                 print(f'[ManualScan] {symbol}: {e}')
+
+        candidates.sort(key=lambda x: x.get('pre_score', 0), reverse=True)
+        batch = candidates[:BATCH_SIZE]
+        signals_found: List[Dict] = []
+
+        if batch:
+            await broadcast({'type': 'scan_status',
+                             'message': f'Phase 2: 1 Claude call for top {len(batch)} setups...',
+                             'candidates': [d['symbol'] for d in batch]})
+            signals = claude.get_batch_signals(batch)
+            for signal in signals:
+                sym = signal.get('symbol', '')
+                await broadcast({'type': 'signal', 'symbol': sym, 'signal': signal})
+                if signal.get('action') in ('LONG', 'SHORT'):
+                    signals_found.append(signal)
+                    notifier.send_signal(signal)
+                    if AUTO_TRADE:
+                        await maybe_execute(signal)
+
         await broadcast({'type': 'scan_complete', 'total_scanned': len(top_coins),
-                         'signals_found': len(signals_found), 'next_scan_in': SCAN_INTERVAL,
-                         'message': f'Scan done — {len(signals_found)} signal(s) found.'})
+                         'candidates': len(batch), 'signals_found': len(signals_found),
+                         'next_scan_in': SCAN_INTERVAL,
+                         'message': f'Manual scan done — {len(batch)} to Claude → {len(signals_found)} signal(s).'})
     background_tasks.add_task(_run)
-    return {'status': 'scan_started', 'coins': TOP_N_COINS}
+    return {'status': 'scan_started', 'coins': TOP_N_COINS, 'batch_size': BATCH_SIZE}
 
 
 @app.post('/analyze/{symbol:path}')
@@ -480,11 +545,35 @@ async def manual_trade(body: Dict):
     tp2    = signal.get('tp2', 0)
     tp3    = signal.get('tp3', 0)
     conf   = signal.get('confidence', 70)
-    sizing = risk.position_size(entry, sl, confidence=conf)
-    result = weex.place_order(signal.get('symbol'), signal.get('action'),
-                               sizing['qty'], entry, sl, tp1, tp2, tp3)
+
+    leverage = signal.get('leverage')
+    if leverage and entry:
+        # Modal-selected leverage — derive qty from free balance × leverage / price
+        bal = weex.get_balance()
+        usdt_free = (bal.get('USDT') or {}).get('free', 0) or risk.settings.account_usdt
+        raw_qty = usdt_free * int(leverage) / entry
+        qty = round(raw_qty, 4)
+        sizing = {'qty': qty, 'leverage': int(leverage), 'risk_mode': 'manual'}
+    else:
+        sizing = risk.position_size(entry, sl, confidence=conf)
+        qty = sizing.get('qty', 0)
+
+    if qty <= 0:
+        return {'executed': False, 'reason': 'Calculated qty is zero'}
+
+    sym    = signal.get('symbol', '')
+    action = signal.get('action', '')
+    result = weex.place_order(sym, action, qty, entry, sl, tp1, tp2, tp3)
     if result:
-        risk.record_open(result.get('id', ''), signal)
+        order_id = result.get('id', '')
+        risk.record_open(order_id, signal)
+        trade_manager.register({
+            'id': order_id, 'symbol': sym, 'side': action,
+            'entry': entry, 'sl': sl, 'tp1': tp1, 'tp2': tp2, 'tp3': tp3, 'qty': qty,
+        })
+        await broadcast({'type': 'trade_opened', 'order': result, 'signal': signal})
+        notifier.send_trade_opened(sym, action, qty, entry, sl, tp1)
+        log_trade(f"MANUAL | {action} {qty} {sym} @ {entry} | SL:{sl} TP1:{tp1} | lev:{leverage or 'risk-based'}")
     return {'executed': bool(result), 'order': result, 'sizing': sizing}
 
 @app.post('/webhook/tradingview')
@@ -552,7 +641,7 @@ if __name__ == '__main__':
     print('  AI TRADE TERMINAL v3 — AUTO SCANNER')
     print(f'  Paper Mode   : {PAPER}')
     print(f'  Auto Trade   : {AUTO_TRADE}')
-    print(f'  Account USDT : ${ACCOUNT_USDT:.2f}')
+    print(f'  Account USDT : fetched from WEEX on startup')
     print(f'  Top N Coins  : {TOP_N_COINS}')
     print(f'  Scan Every   : {SCAN_INTERVAL}s ({SCAN_INTERVAL//60} min)')
     print(f'  Min Confidence: 72%')

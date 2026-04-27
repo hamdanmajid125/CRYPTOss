@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from typing import Tuple, List, Dict
 import time
 import datetime
+import json
+import os
 
 
 @dataclass
@@ -16,8 +18,9 @@ class RiskSettings:
 
 
 class RiskManager:
-    def __init__(self, settings: RiskSettings):
-        self.settings = settings
+    def __init__(self, settings: RiskSettings, state_file: str = 'risk_state.json'):
+        self.settings   = settings
+        self.state_file = state_file
         self.open_trades: List[Dict] = []
 
         # Daily stats (reset at midnight UTC)
@@ -39,6 +42,57 @@ class RiskManager:
 
         # Correlation tracking: symbol -> side
         self.btc_eth_sides: Dict[str, str] = {}
+
+        self._load_state()
+
+    # ── STATE PERSISTENCE ─────────────────────────────────────────────────────
+
+    def _save_state(self):
+        try:
+            state = {
+                'day_key':            self._day_key,
+                'consecutive_losses': self.consecutive_losses,
+                'pause_until':        self.pause_until,
+                'daily_pnl':          self.daily_pnl,
+                'daily_trades':       self.daily_trades,
+                'daily_wins':         self.daily_wins,
+                'daily_losses':       self.daily_losses,
+                'best_trade':         self.best_trade,
+                'worst_trade':        self.worst_trade,
+                'current_balance':    self.current_balance,
+                'peak_balance':       self.peak_balance,
+            }
+            with open(self.state_file, 'w') as f:
+                json.dump(state, f)
+        except Exception as e:
+            print(f'[Risk] State save failed: {e}')
+
+    def _load_state(self):
+        if not os.path.exists(self.state_file):
+            return
+        try:
+            with open(self.state_file) as f:
+                state = json.load(f)
+            # Always restore balance curve
+            self.current_balance = state.get('current_balance', self.settings.account_usdt)
+            self.peak_balance    = state.get('peak_balance',    self.settings.account_usdt)
+            self.consecutive_losses = state.get('consecutive_losses', 0)
+            self.pause_until        = state.get('pause_until', 0.0)
+            # Restore daily stats only if the saved day matches today
+            if state.get('day_key') == self._utc_day():
+                self.daily_pnl    = state.get('daily_pnl',    0.0)
+                self.daily_trades = state.get('daily_trades',  0)
+                self.daily_wins   = state.get('daily_wins',    0)
+                self.daily_losses = state.get('daily_losses',  0)
+                self.best_trade   = state.get('best_trade',    0.0)
+                self.worst_trade  = state.get('worst_trade',   0.0)
+            print(f'[Risk] State restored from {self.state_file}')
+        except Exception as e:
+            print(f'[Risk] State load failed: {e}')
+
+    def clear_state(self):
+        if os.path.exists(self.state_file):
+            os.remove(self.state_file)
 
     # ── DAILY RESET ────────────────────────────────────────────────────────────
 
@@ -183,6 +237,7 @@ class RiskManager:
             'time': time.time(),
         })
         self.daily_trades += 1
+        self._save_state()
 
     def record_close(self, trade_id: str, pnl_usdt: float):
         self.open_trades = [t for t in self.open_trades if t['id'] != trade_id]
@@ -200,6 +255,7 @@ class RiskManager:
             self.consecutive_losses += 1
             self.worst_trade = min(self.worst_trade, pnl_usdt)
             self._check_pause_conditions(pnl_usdt)
+        self._save_state()
 
     def _check_pause_conditions(self, pnl_usdt: float):
         if self.consecutive_losses >= 5:

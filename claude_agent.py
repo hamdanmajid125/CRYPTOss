@@ -82,12 +82,13 @@ class ClaudeAgent:
         near_ob = any(abs(o['price'] - price) / price < 0.005 for o in obs)
         if near_ob: score += 8
 
-        # EMA200 alignment
-        ema200 = data.get('ema200', price)
-        if overall == 'BULLISH' and price > ema200: score += 5   # Macro aligned
-        elif overall == 'BULLISH' and price < ema200: score -= 10  # Fighting macro trend
-        elif overall == 'BEARISH' and price < ema200: score += 5
-        elif overall == 'BEARISH' and price > ema200: score -= 10
+        # EMA200 alignment (skip if not enough candle data)
+        ema200 = data.get('ema200')
+        if ema200 is not None:
+            if overall == 'BULLISH' and price > ema200:   score += 5
+            elif overall == 'BULLISH' and price < ema200: score -= 10
+            elif overall == 'BEARISH' and price < ema200: score += 5
+            elif overall == 'BEARISH' and price > ema200: score -= 10
 
         # MACD alignment
         macd     = data.get('macd', 0)
@@ -115,6 +116,10 @@ class ClaudeAgent:
 
         pre_score      = self._score_confidence(data, tf_bias, fng)
         candle_pattern = data.get('candle_pattern', 'No pattern detected')
+        ema200         = data.get('ema200')
+        ema200_str     = 'N/A (not enough data — 200+ candles required)' if ema200 is None else str(ema200)
+        ema200_arrow   = ('⚠️ Unavailable' if ema200 is None else
+                          'ABOVE ✅ (macro bullish)' if price > ema200 else 'BELOW ❌ (macro bearish)')
         volume_signal  = data.get('volume_signal', 'NORMAL')
         volume_trend   = data.get('volume_trend', 'FLAT')
         rsi_div        = data.get('rsi_divergence', 'NONE')
@@ -180,7 +185,7 @@ RULE: LONG only if overall = BULLISH. SHORT only if overall = BEARISH.
 Price  : {price}
 EMA20  : {data['ema20']}  → Price {'ABOVE ✅' if price > data['ema20'] else 'BELOW ❌'}
 EMA50  : {data['ema50']}  → Price {'ABOVE ✅' if price > data['ema50'] else 'BELOW ❌'}
-EMA200 : {data['ema200']} → Price {'ABOVE ✅ (macro bullish)' if price > data['ema200'] else 'BELOW ❌ (macro bearish)'}
+EMA200 : {ema200_str} → Price {ema200_arrow}
 24h Change: {data['change24h']}%
 
 EMA200 RULE: Trading AGAINST EMA200 = -10 confidence. Trading WITH EMA200 = +5 confidence.
@@ -310,7 +315,139 @@ Respond ONLY with this exact JSON (no markdown, no preamble, no explanation):
 {{"action":"LONG or SHORT or WAIT","confidence":0-100,"entry":{price},"sl":0.0,"tp1":0.0,"tp2":0.0,"tp3":0.0,"rr":"1:X.X","setup_type":"exact SMC setup name e.g. Bullish OB+FVG+Engulfing / Liquidity Sweep+BOS+Retest / WAIT-mixed-TF","session":"{self._trading_session()}","candle_pattern":"{candle_pattern}","timeframe_bias":"{tf_bias['overall']}","sentiment":"{fng['label']}","volume_signal":"{volume_signal}","reason":"3 sentences: (1) SMC structure and why this entry (2) Volume + candlestick + RSI confluence (3) Key risk factor and what would invalidate this trade","key_level":"most critical price level to watch","invalidation":"exact price that completely invalidates this setup — where you would cut the loss"}}'''
 
     # ─────────────────────────────────────────────────────────────────────────
-    # GET SIGNAL
+    # BATCH SIGNAL  (one Claude call for N coins — replaces N individual calls)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def build_compact_summary(self, data: dict) -> str:
+        """~250-token compact block for one coin, used inside the batch prompt."""
+        price   = data['price']
+        atr     = data['atr']
+        tf_bias = data['timeframe_bias']
+        per_tf  = tf_bias.get('per_tf', {})
+        fng     = data['fear_greed']
+        bos     = data.get('bos_choch', {'type': 'NONE', 'level': 0, 'confirmed': False})
+        regime  = data.get('regime', 'RANGING')
+        funding = data.get('funding_rate', {})
+        obs     = data.get('order_blocks', [])
+        fvgs    = data.get('fvgs', [])
+        liq     = data.get('liquidity', {'bsl': [], 'ssl': []})
+        ema200  = data.get('ema200')
+
+        ob_str  = ', '.join(
+            f"{o['type']}@{o['price']:.4f}(R:{o.get('respect_count', 0)})" for o in obs
+        ) or 'NONE'
+        fvg_str = ', '.join(
+            f"{f['type']} {f['bot']:.4f}-{f['top']:.4f}({f.get('partial_fill_pct', 0):.0f}%fill)"
+            for f in fvgs
+        ) or 'NONE'
+        macd_dir = 'BULL' if data['macd'] > data['macd_sig'] else 'BEAR'
+        bb_pos   = ('NEAR_UPPER' if price > data['bb_upper'] * 0.998 else
+                    'NEAR_LOWER' if price < data['bb_lower'] * 1.002 else 'MID')
+
+        return (
+            f"── {data['symbol']} | pre-score={data.get('pre_score', 0)}/100 ──\n"
+            f"TF: 15m={per_tf.get('15m','?')} 1h={per_tf.get('1h','?')} 4h={per_tf.get('4h','?')}"
+            f" → {tf_bias['overall']} {tf_bias['agreement']}/3\n"
+            f"Regime={regime} | BOS/CHoCH={bos['type']}@{bos['level']} "
+            f"({'CONFIRMED' if bos['confirmed'] else 'UNCONFIRMED'})\n"
+            f"Price={price} ATR={atr:.4f} | EMA20={data['ema20']} EMA50={data['ema50']}"
+            f" EMA200={ema200 if ema200 else 'N/A'}\n"
+            f"RSI={data['rsi']} | RSI_Div={data.get('rsi_divergence','NONE')[:25]}"
+            f" | MACD={macd_dir} | BB={bb_pos}\n"
+            f"Vol={data.get('volume_signal','NORMAL')} trend={data.get('volume_trend','FLAT')}\n"
+            f"Pattern={data.get('candle_pattern','None')[:40]}\n"
+            f"OBs={ob_str} | FVGs={fvg_str}\n"
+            f"BSL={[round(x, 4) for x in liq.get('bsl', [])[:2]]}"
+            f" SSL={[round(x, 4) for x in liq.get('ssl', [])[:2]]}\n"
+            f"News={data.get('news_sentiment','N/A')[:50]}"
+            f" | F&G={fng.get('value', 50)}/{fng.get('label', '')}\n"
+            f"Funding={funding.get('label', 'Neutral')[:40]}\n"
+            f"SL_range=[{round(price - atr*1.2, 4)}, {round(price - atr*2.5, 4)}]"
+            f" TP1_target={round(price + atr*2.5, 4)}"
+        )
+
+    def get_batch_signals(self, data_list: list) -> list:
+        """
+        Analyze multiple pre-filtered coins in ONE Claude call.
+        Replaces N individual get_signal() calls — massive token saving.
+        Returns a list of signal dicts (one per input coin).
+        """
+        if not data_list:
+            return []
+
+        n        = len(data_list)
+        session  = self._trading_session()
+        summaries = '\n\n'.join(self.build_compact_summary(d) for d in data_list)
+
+        prompt = f'''You are a professional institutional crypto trader (15 years, SMC/ICT specialist).
+Analyze {n} setups in ONE pass. Goal: protect capital. Only trade the 1-2 BEST setups.
+
+━━ RULES (apply to every coin) ━━
+LONG: TF_overall=BULLISH ≥2/3 | RSI<70 | volume≠VERY LOW | OB/FVG/CHoCH present | confidence≥72
+SHORT: TF_overall=BEARISH ≥2/3 | RSI>30 | volume≠VERY LOW | OB/FVG/CHoCH present | confidence≥72
+WAIT: TF=MIXED | VERY LOW volume | RSI>78+LONG | RSI<22+SHORT | no confluence | confidence<72
+Priority: CHoCH > BOS > OB+FVG > OB alone | High respect_count = stronger zone
+Unfilled FVG = price magnet. Min R:R 1:2.5. SL beyond OB/swing (ATR×1.2-2.5).
+TP1=ATR×2.5 TP2=ATR×4.5 TP3=ATR×7.0 | Session: {session}
+
+━━ {n} SETUPS ━━
+
+{summaries}
+
+━━ OUTPUT ━━
+Return exactly {n} objects (one per coin), sorted by confidence desc. WAIT all weak setups.
+ONLY JSON array, no markdown, no extra text:
+[{{"symbol":"X/USDT","action":"LONG|SHORT|WAIT","confidence":0-100,"entry":0.0,"sl":0.0,"tp1":0.0,"tp2":0.0,"tp3":0.0,"rr":"1:X.X","setup_type":"setup name or WAIT-reason","reason":"why entry + key risk (2 sentences)","key_level":"critical level","invalidation":"exact invalidation price"}}]'''
+
+        try:
+            resp = self.client.messages.create(
+                model=self.model_fast,   # sonnet — fast + cheap for scanning
+                max_tokens=300 * n + 200,
+                messages=[{'role': 'user', 'content': prompt}],
+            )
+            text = next(b.text for b in resp.content if b.type == 'text').strip()
+            text = text.replace('```json', '').replace('```', '').strip()
+
+            raw = json.loads(text)
+            if not isinstance(raw, list):
+                print('[Claude] Batch: response was not a JSON array')
+                return []
+
+            by_sym = {d['symbol']: d for d in data_list}
+            result = []
+            for sig in raw:
+                sym  = sig.get('symbol', '')
+                orig = by_sym.get(sym, {})
+                sig.update({
+                    'symbol':         sym,
+                    'price':          orig.get('price', sig.get('entry', 0)),
+                    'timestamp':      orig.get('timestamp', ''),
+                    'pre_score':      orig.get('pre_score', 0),
+                    'timeframe_bias': orig.get('timeframe_bias', {}).get('overall', 'MIXED'),
+                    'volume_signal':  orig.get('volume_signal', 'NORMAL'),
+                    'candle_pattern': orig.get('candle_pattern', ''),
+                    'bos_choch':      orig.get('bos_choch', {'type': 'NONE', 'level': 0, 'confirmed': False}),
+                    'regime':         orig.get('regime', 'RANGING'),
+                    'sentiment':      orig.get('fear_greed', {}).get('label', 'Neutral'),
+                    'session':        session,
+                })
+                # Enforce confidence gate
+                if sig.get('action') in ('LONG', 'SHORT') and sig.get('confidence', 0) < 72:
+                    sig['action'] = 'WAIT'
+                    sig['reason'] = (f"Confidence {sig['confidence']}% below 72. "
+                                     + sig.get('reason', ''))
+                result.append(sig)
+
+            print(f'[Claude] Batch: {n} coins → 1 call → '
+                  f"{sum(1 for s in result if s.get('action') in ('LONG','SHORT'))} signal(s)")
+            return result
+
+        except Exception as e:
+            print(f'[Claude] Batch error: {e}')
+            return []
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # GET SIGNAL  (kept for manual analyze / webhook — single-coin deep analysis)
     # ─────────────────────────────────────────────────────────────────────────
     def get_signal(self, market_data: dict, deep: bool = False) -> Optional[Dict]:
         try:
