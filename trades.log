@@ -68,3 +68,19 @@
 2026-04-27 08:18:58 | ATTEMPT | ZEC/USDT | LONG | conf:76 | R:R 2.08 below minimum 3.0
 2026-04-27 08:24:47 | SIGNAL | LONG | ZEC/USDT | conf:82% | BOS Bullish Continuation + EMA Stack
 2026-04-27 08:24:47 | ATTEMPT | ZEC/USDT | LONG | conf:82 | R:R 2.08 below minimum 3.0
+2026-04-28 18:23:30 | SIGNAL | LONG | BIO/USDT | conf:74% | BOS Bullish + Bullish OB + FVG Retest
+2026-04-28 18:23:30 | ATTEMPT | BIO/USDT | LONG | conf:74 | R:R 2.50 below minimum 3.0
+2026-04-29 08:31:41 | ATTEMPT | DOGE/USDT | LONG | conf:72 | R:R 1.56 below minimum 3.0
+2026-04-29 08:36:00 | SIGNAL | LONG | DOGE/USDT | conf:74% | EMA Stack Bull + OB Confluence + BSL Raid Target
+2026-04-29 08:36:00 | ATTEMPT | DOGE/USDT | LONG | conf:74 | R:R 1.00 below minimum 3.0
+2026-04-29 19:35:47 | ATTEMPT | RLUSD/USDT | LONG | conf:78 | R:R 2.00 below minimum 3.0
+2026-04-29 19:36:34 | SIGNAL | SHORT | PLUME/USDT | conf:78% | Bearish OB + FVG Cascade SHORT
+2026-04-29 19:36:34 | ATTEMPT | PLUME/USDT | SHORT | conf:78 | R:R 2.50 below minimum 3.0
+2026-04-29 19:36:34 | SIGNAL | SHORT | SOL/USDT | conf:72% | Bearish FVG Stack + RSI Divergence SHORT
+2026-04-29 19:36:34 | ATTEMPT | SOL/USDT | SHORT | conf:72 | R:R 1.07 below minimum 3.0
+2026-04-29 19:42:49 | SIGNAL | SHORT | BNB/USDT | conf:78% | Bearish FVG Stack + EMA Compression Short
+2026-04-29 19:42:49 | ATTEMPT | BNB/USDT | SHORT | conf:78 | R:R 0.83 below minimum 3.0
+2026-04-29 19:42:49 | SIGNAL | SHORT | XRP/USDT | conf:76% | Bearish BOS + FVG Stack Short
+2026-04-29 19:42:49 | ATTEMPT | XRP/USDT | SHORT | conf:76 | R:R 1.08 below minimum 3.0
+2026-04-29 19:42:49 | SIGNAL | SHORT | SOL/USDT | conf:74% | Bearish FVG Confluence Short + RSI Divergence
+2026-04-29 19:42:49 | ATTEMPT | SOL/USDT | SHORT | conf:74 | R:R 1.39 below minimum 3.0

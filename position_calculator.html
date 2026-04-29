@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Position Sizer — CRYPTOss</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet"/>
+<style>
+:root{
+  --bg:#060a0f;--bg1:#090e15;--bg2:#0c1520;--bg3:#101c2a;--bg4:#152030;
+  --border:#1a2e44;--border2:#243f5c;
+  --green:#00ff88;--green2:#00cc6a;--greenBg:rgba(0,255,136,.07);
+  --red:#ff4466;--red2:#cc3355;--redBg:rgba(255,68,102,.07);
+  --gold:#ffcc00;--goldBg:rgba(255,204,0,.07);
+  --cyan:#00d4ff;--cyanBg:rgba(0,212,255,.07);
+  --purple:#aa66ff;--orange:#ff8844;--orangeBg:rgba(255,136,68,.09);
+  --text:#8ab0cc;--textHi:#cce0f5;--textDim:#3a5a7a;
+  --font:'JetBrains Mono',monospace;--fontH:'Syne',sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:var(--font);font-size:12px;overflow-x:hidden}
+
+/* Grid lines bg */
+body{background-image:linear-gradient(rgba(26,46,68,.18) 1px,transparent 1px),linear-gradient(90deg,rgba(26,46,68,.18) 1px,transparent 1px);background-size:40px 40px}
+
+/* Scanlines */
+body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.035) 2px,rgba(0,0,0,.035) 4px);pointer-events:none;z-index:9999}
+
+.wrap{max-width:1040px;margin:0 auto;padding:18px 16px 50px}
+
+/* ── HEADER ─────────────────────────────────────────────────────────────── */
+.hdr{
+  display:flex;align-items:center;gap:16px;
+  padding:14px 18px;margin-bottom:20px;
+  background:var(--bg2);border:1px solid var(--border);border-radius:8px;
+  position:relative;overflow:hidden;
+}
+.hdr::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--cyan),transparent)}
+.hdr-logo{font-family:var(--fontH);font-size:20px;font-weight:800;color:var(--textHi);letter-spacing:-.5px;white-space:nowrap}
+.hdr-logo em{color:var(--cyan);font-style:normal}
+.hdr-tagline{font-size:8px;letter-spacing:3px;text-transform:uppercase;color:var(--textDim);margin-top:2px}
+.hdr-bal{
+  margin-left:auto;display:flex;align-items:center;gap:10px;
+  background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:7px 14px;
+}
+.live-dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 10px var(--green);flex-shrink:0;animation:blink 2s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+.hdr-bal-inner .lbl{font-size:7px;color:var(--textDim);letter-spacing:2px;text-transform:uppercase;margin-bottom:2px}
+.hdr-bal-inner .val{font-size:17px;font-weight:700;color:var(--cyan);text-shadow:0 0 14px rgba(0,212,255,.45);font-family:var(--fontH)}
+.hdr-refresh{background:none;border:1px solid var(--border);color:var(--textDim);font-family:var(--font);font-size:10px;padding:4px 9px;border-radius:3px;cursor:pointer;transition:all .15s}
+.hdr-refresh:hover{border-color:var(--cyan);color:var(--cyan)}
+
+/* ── MAIN GRID ───────────────────────────────────────────────────────────── */
+.main-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+
+/* ── PANELS ──────────────────────────────────────────────────────────────── */
+.panel{background:var(--bg2);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.panel-hdr{
+  padding:8px 14px;border-bottom:1px solid var(--border);
+  font-size:8px;letter-spacing:2.5px;text-transform:uppercase;color:var(--textDim);
+  display:flex;align-items:center;gap:8px;
+}
+.panel-hdr .phd-dot{width:3px;height:14px;border-radius:2px;background:var(--cyan);flex-shrink:0}
+.panel-hdr .phd-dot.green{background:var(--green)}
+.panel-hdr .phd-dot.gold{background:var(--gold)}
+.panel-hdr .phd-dot.red{background:var(--red)}
+.panel-body{padding:14px}
+
+/* ── INPUTS ──────────────────────────────────────────────────────────────── */
+.dir-toggle{display:flex;gap:6px;margin-bottom:12px}
+.dir-btn{
+  flex:1;padding:9px;border:1px solid var(--border);border-radius:4px;
+  background:var(--bg3);font-family:var(--font);font-size:11px;font-weight:700;
+  letter-spacing:1px;cursor:pointer;transition:all .15s;color:var(--textDim);
+}
+.dir-btn.long.active{background:var(--greenBg);border-color:var(--green2);color:var(--green);box-shadow:0 0 12px rgba(0,255,136,.08)}
+.dir-btn.short.active{background:var(--redBg);border-color:var(--red2);color:var(--red);box-shadow:0 0 12px rgba(255,68,102,.08)}
+
+.inp-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.inp-group{margin-bottom:9px}
+.inp-group:last-child{margin-bottom:0}
+.inp-label{font-size:8px;letter-spacing:1.5px;text-transform:uppercase;color:var(--textDim);margin-bottom:4px;display:flex;justify-content:space-between;align-items:center}
+.inp-label .hint{font-size:7px;color:var(--border2);font-weight:400;letter-spacing:0;text-transform:none}
+.inp-wrap{position:relative}
+.inp{
+  width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:4px;
+  padding:8px 36px 8px 10px;font-family:var(--font);font-size:13px;font-weight:600;
+  color:var(--textHi);outline:none;transition:border-color .15s,box-shadow .15s,-webkit-appearance 0s;
+  -webkit-appearance:none;appearance:none;
+}
+.inp:focus{border-color:var(--cyan);box-shadow:0 0 0 2px rgba(0,212,255,.1)}
+.inp::placeholder{color:var(--textDim);font-weight:400;font-size:11px}
+.inp-unit{position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:8px;color:var(--textDim);pointer-events:none;letter-spacing:1px}
+.inp.valid{border-color:rgba(0,255,136,.35);background:rgba(0,255,136,.02)}
+.inp.err-field{border-color:rgba(255,68,102,.4);background:rgba(255,68,102,.02)}
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+input[type=number]{-moz-appearance:textfield;appearance:textfield}
+
+/* ── PRESETS ─────────────────────────────────────────────────────────────── */
+.presets{display:flex;gap:6px;margin-bottom:12px}
+.preset-btn{
+  flex:1;padding:8px 4px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;
+  font-family:var(--font);font-size:9px;font-weight:600;cursor:pointer;letter-spacing:.5px;
+  text-align:center;transition:all .15s;color:var(--textDim);
+}
+.preset-btn:hover{background:var(--bg4);color:var(--textHi)}
+.preset-btn.cons{border-color:rgba(0,255,136,.3);color:var(--green)}
+.preset-btn.cons:hover{background:var(--greenBg)}
+.preset-btn.bal{border-color:rgba(255,204,0,.3);color:var(--gold)}
+.preset-btn.bal:hover{background:var(--goldBg)}
+.preset-btn.agg{border-color:rgba(255,68,102,.3);color:var(--red)}
+.preset-btn.agg:hover{background:var(--redBg)}
+
+/* ── CONFIDENCE SLIDER ───────────────────────────────────────────────────── */
+.conf-big{font-family:var(--fontH);font-size:36px;font-weight:800;text-align:center;line-height:1;transition:color .2s;margin-bottom:2px}
+.conf-slider{
+  width:100%;-webkit-appearance:none;appearance:none;
+  height:8px;border-radius:4px;outline:none;cursor:pointer;margin:10px 0 8px;
+  background:linear-gradient(90deg,var(--red) 0%,var(--gold) 40%,var(--green2) 70%,var(--green) 100%);
+  border:1px solid var(--border);
+}
+.conf-slider::-webkit-slider-thumb{
+  -webkit-appearance:none;appearance:none;width:20px;height:20px;border-radius:50%;cursor:pointer;
+  border:3px solid var(--bg2);box-shadow:0 0 10px rgba(0,0,0,.6);background:white;transition:transform .1s,box-shadow .1s;
+}
+.conf-slider::-webkit-slider-thumb:hover{transform:scale(1.2);box-shadow:0 0 0 4px rgba(255,255,255,.1)}
+.conf-slider::-moz-range-thumb{width:20px;height:20px;border-radius:50%;cursor:pointer;border:3px solid var(--bg2);background:white}
+.conf-tag{display:inline-block;font-size:9px;letter-spacing:2px;text-transform:uppercase;border-radius:3px;padding:3px 12px;border:1px solid;transition:all .25s}
+.conf-scale{display:flex;justify-content:space-between;font-size:7px;color:var(--textDim);margin-top:5px}
+
+/* ── OUTPUT SECTION ──────────────────────────────────────────────────────── */
+.out-section{display:grid;grid-template-columns:1fr 1fr 1fr 220px;gap:12px;margin-bottom:12px;align-items:start}
+
+/* Big output cards */
+.out-card{
+  background:var(--bg2);border:1px solid var(--border);border-radius:8px;
+  padding:14px 16px;position:relative;overflow:hidden;
+}
+.out-card::after{
+  content:'';position:absolute;bottom:0;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,transparent,var(--cyan),transparent);opacity:.3;
+}
+.out-card.green-accent::after{background:linear-gradient(90deg,transparent,var(--green),transparent)}
+.out-card.gold-accent::after{background:linear-gradient(90deg,transparent,var(--gold),transparent)}
+.out-card.red-accent::after{background:linear-gradient(90deg,transparent,var(--red),transparent)}
+.oc-lbl{font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--textDim);margin-bottom:8px}
+.oc-val{font-size:28px;font-weight:700;font-family:var(--fontH);line-height:1;margin-bottom:5px;transition:all .25s}
+.oc-sub{font-size:9px;color:var(--textDim)}
+/* Corner brackets */
+.out-card::before{
+  content:'⌐';position:absolute;top:6px;right:8px;font-size:14px;color:var(--border2);opacity:.5;
+}
+
+.glow-cyan{color:var(--cyan);text-shadow:0 0 18px rgba(0,212,255,.55),0 0 36px rgba(0,212,255,.2)}
+.glow-green{color:var(--green);text-shadow:0 0 18px rgba(0,255,136,.55),0 0 36px rgba(0,255,136,.2)}
+.glow-gold{color:var(--gold);text-shadow:0 0 16px rgba(255,204,0,.5)}
+.glow-red{color:var(--red);text-shadow:0 0 16px rgba(255,68,102,.5)}
+.glow-orange{color:var(--orange);text-shadow:0 0 16px rgba(255,136,68,.45)}
+
+/* ── MINI STATS ──────────────────────────────────────────────────────────── */
+.mini-row{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
+.mini-card{background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:9px 11px;text-align:center}
+.mini-lbl{font-size:7px;letter-spacing:2px;text-transform:uppercase;color:var(--textDim);margin-bottom:4px}
+.mini-val{font-size:13px;font-weight:700;color:var(--textHi);transition:all .2s}
+
+/* ── RISK METER ──────────────────────────────────────────────────────────── */
+.meter-panel{display:flex;flex-direction:column}
+.meter-inner{display:flex;flex-direction:column;align-items:center;padding:14px 12px 12px;flex:1}
+.meter-svg{width:192px;height:110px;overflow:visible}
+.risk-badge{
+  font-family:var(--fontH);font-size:12px;font-weight:700;letter-spacing:2.5px;
+  text-transform:uppercase;padding:6px 18px;border-radius:4px;margin-top:10px;
+  text-align:center;border:1px solid;transition:all .35s;min-width:160px;
+}
+.meter-sub{font-size:8px;color:var(--textDim);text-align:center;margin-top:5px;line-height:1.5}
+
+/* ── P&L TABLE ───────────────────────────────────────────────────────────── */
+.pnl-tbl{width:100%;border-collapse:collapse}
+.pnl-tbl th{
+  font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--textDim);
+  text-align:left;padding:8px 14px;border-bottom:1px solid var(--border);background:var(--bg3);
+}
+.pnl-tbl th:last-child,.pnl-tbl td:last-child,.pnl-tbl th:nth-child(4),.pnl-tbl td:nth-child(4),.pnl-tbl th:nth-child(5),.pnl-tbl td:nth-child(5){text-align:right}
+.pnl-tbl td{padding:9px 14px;border-bottom:1px solid rgba(26,46,68,.7);transition:background .1s}
+.pnl-tbl tr:last-child td{border:none}
+.pnl-tbl tbody tr:hover td{background:rgba(255,255,255,.015)}
+.td-label{font-size:11px;font-weight:700;font-family:var(--fontH)}
+.td-dist{font-size:9px;color:var(--textDim);line-height:1.7}
+.td-close{font-size:9px;color:var(--textDim)}
+.td-usdt{font-size:13px;font-weight:700}
+.td-pct{font-size:10px}
+.bar-cell{width:110px}
+.bar-bg{height:5px;background:var(--bg3);border-radius:3px;overflow:hidden;border:1px solid var(--border)}
+.bar-fill{height:100%;border-radius:3px;transition:width .5s cubic-bezier(.4,0,.2,1)}
+
+/* ── FLASH ANIMATION ─────────────────────────────────────────────────────── */
+@keyframes flash{0%{opacity:.2;transform:scale(.97)}100%{opacity:1;transform:scale(1)}}
+.flash{animation:flash .22s ease-out}
+
+/* Scrollbar */
+::-webkit-scrollbar{width:3px;height:3px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ── HEADER ─────────────────────────────────────────────────────────── -->
+  <div class="hdr">
+    <div>
+      <div class="hdr-logo">CRYPTOss <em>CALC</em></div>
+      <div class="hdr-tagline">Position Sizer · Risk Manager · Signal Optimizer</div>
+    </div>
+    <div class="hdr-bal">
+      <div class="live-dot" id="liveDot"></div>
+      <div class="hdr-bal-inner">
+        <div class="lbl">WEEX FREE BALANCE</div>
+        <div class="val" id="balDisplay">Fetching…</div>
+      </div>
+    </div>
+    <button class="hdr-refresh" onclick="fetchBalance()">⟳ Refresh</button>
+  </div>
+
+  <!-- ── INPUTS ─────────────────────────────────────────────────────────── -->
+  <div class="main-grid">
+
+    <!-- Signal Params -->
+    <div class="panel">
+      <div class="panel-hdr"><div class="phd-dot"></div>Signal Parameters</div>
+      <div class="panel-body">
+        <div class="dir-toggle">
+          <button class="dir-btn long active" id="btnLong" onclick="setDir('LONG')">⬆ LONG</button>
+          <button class="dir-btn short" id="btnShort" onclick="setDir('SHORT')">⬇ SHORT</button>
+        </div>
+
+        <div class="inp-row" style="margin-bottom:9px">
+          <div class="inp-group" style="margin:0">
+            <div class="inp-label">Entry Price</div>
+            <div class="inp-wrap">
+              <input class="inp" id="entry" type="number" placeholder="e.g. 97500" step="any" min="0" oninput="recalc()"/>
+              <span class="inp-unit">USDT</span>
+            </div>
+          </div>
+          <div class="inp-group" style="margin:0">
+            <div class="inp-label">Stop Loss <span class="hint" id="slHint"></span></div>
+            <div class="inp-wrap">
+              <input class="inp" id="sl" type="number" placeholder="below entry" step="any" min="0" oninput="recalc()"/>
+              <span class="inp-unit">USDT</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="inp-row" style="margin-bottom:9px">
+          <div class="inp-group" style="margin:0">
+            <div class="inp-label">TP1 <span class="hint">40% close</span></div>
+            <div class="inp-wrap">
+              <input class="inp" id="tp1" type="number" placeholder="target 1" step="any" min="0" oninput="recalc()"/>
+              <span class="inp-unit">USDT</span>
+            </div>
+          </div>
+          <div class="inp-group" style="margin:0">
+            <div class="inp-label">TP2 <span class="hint">40% close</span></div>
+            <div class="inp-wrap">
+              <input class="inp" id="tp2" type="number" placeholder="optional" step="any" min="0" oninput="recalc()"/>
+              <span class="inp-unit">USDT</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="inp-group">
+          <div class="inp-label">TP3 <span class="hint">20% runner</span></div>
+          <div class="inp-wrap">
+            <input class="inp" id="tp3" type="number" placeholder="optional" step="any" min="0" oninput="recalc()"/>
+            <span class="inp-unit">USDT</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Account + Confidence -->
+    <div style="display:flex;flex-direction:column;gap:12px">
+
+      <div class="panel">
+        <div class="panel-hdr"><div class="phd-dot green"></div>Account & Risk</div>
+        <div class="panel-body">
+          <div class="presets">
+            <button class="preset-btn cons" onclick="setPreset('cons')">▲ Conservative</button>
+            <button class="preset-btn bal"  onclick="setPreset('bal')">◆ Balanced</button>
+            <button class="preset-btn agg"  onclick="setPreset('agg')">▼ Aggressive</button>
+          </div>
+          <div class="inp-row">
+            <div class="inp-group" style="margin:0">
+              <div class="inp-label">Wallet (USDT) <span class="hint" id="balSrc">live WEEX</span></div>
+              <div class="inp-wrap">
+                <input class="inp" id="wallet" type="number" placeholder="0.00" step="any" min="0" oninput="recalc()"/>
+                <span class="inp-unit">USDT</span>
+              </div>
+            </div>
+            <div class="inp-group" style="margin:0">
+              <div class="inp-label">Risk Per Trade</div>
+              <div class="inp-wrap">
+                <input class="inp" id="riskPct" type="number" value="1.5" step="0.1" min="0.1" max="10" oninput="recalc()"/>
+                <span class="inp-unit">%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" style="flex:1">
+        <div class="panel-hdr"><div class="phd-dot gold"></div>Signal Confidence</div>
+        <div class="panel-body">
+          <div class="conf-big" id="confBig" style="color:var(--green)">72%</div>
+          <input type="range" class="conf-slider" id="confSlider" min="50" max="100" value="72" oninput="recalc()"/>
+          <div style="text-align:center;margin-bottom:6px">
+            <span class="conf-tag" id="confTag">CONFIRMED</span>
+          </div>
+          <div class="conf-scale">
+            <span>50</span><span style="color:var(--red)">60</span><span style="color:var(--gold)">72</span><span style="color:var(--green)">85</span><span>100</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── OUTPUTS ─────────────────────────────────────────────────────────── -->
+  <div class="out-section">
+    <div class="out-card" id="cardLev">
+      <div class="oc-lbl">Recommended Leverage</div>
+      <div class="oc-val glow-cyan" id="outLev">—</div>
+      <div class="oc-sub" id="outLevSub">awaiting signal</div>
+    </div>
+    <div class="out-card green-accent">
+      <div class="oc-lbl">Margin to Use</div>
+      <div class="oc-val glow-green" id="outMargin">—</div>
+      <div class="oc-sub" id="outMarginSub">risk capital</div>
+    </div>
+    <div class="out-card">
+      <div class="oc-lbl">Position Size</div>
+      <div class="oc-val" id="outPos" style="color:var(--textHi)">—</div>
+      <div class="oc-sub" id="outPosSub">total exposure</div>
+    </div>
+
+    <!-- Risk Meter -->
+    <div class="panel meter-panel">
+      <div class="panel-hdr" style="justify-content:center"><div class="phd-dot red"></div>Risk Assessment</div>
+      <div class="meter-inner">
+        <svg class="meter-svg" viewBox="0 0 200 115">
+          <defs>
+            <linearGradient id="arcGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%"   stop-color="#00ff88"/>
+              <stop offset="33%"  stop-color="#ffcc00"/>
+              <stop offset="66%"  stop-color="#ff8844"/>
+              <stop offset="100%" stop-color="#ff4466"/>
+            </linearGradient>
+            <filter id="glow"><feGaussianBlur stdDeviation="3" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+          </defs>
+          <!-- Track base -->
+          <path d="M 18,100 A 82,82,0,0,1,182,100" fill="none" stroke="#0c1520" stroke-width="16" stroke-linecap="round"/>
+          <path d="M 18,100 A 82,82,0,0,1,182,100" fill="none" stroke="#1a2e44" stroke-width="14" stroke-linecap="round"/>
+          <!-- Dim full range -->
+          <path d="M 18,100 A 82,82,0,0,1,182,100" fill="none" stroke="url(#arcGrad)" stroke-width="14" stroke-linecap="round" opacity="0.18"/>
+          <!-- Active fill -->
+          <path id="arcActive" d="M 18,100 A 82,82,0,0,1,182,100" fill="none" stroke="url(#arcGrad)" stroke-width="14" stroke-linecap="round"
+                stroke-dasharray="257.6" stroke-dashoffset="257.6"
+                style="transition:stroke-dashoffset .6s cubic-bezier(.4,0,.2,1);filter:url(#glow)"/>
+          <!-- Tick marks -->
+          <g stroke="#1a2e44" stroke-width="1">
+            <line x1="100" y1="20" x2="100" y2="28"/>
+            <line x1="42"  y1="40" x2="47"  y2="47"/>
+            <line x1="158" y1="40" x2="153" y2="47"/>
+          </g>
+          <!-- Needle -->
+          <line id="arcNeedle" x1="100" y1="100" x2="100" y2="24"
+                stroke="#cce0f5" stroke-width="2.5" stroke-linecap="round"
+                style="transition:transform .6s cubic-bezier(.4,0,.2,1);transform-origin:100px 100px"/>
+          <!-- Hub -->
+          <circle cx="100" cy="100" r="8"  fill="#090e15" stroke="#243f5c" stroke-width="1.5"/>
+          <circle cx="100" cy="100" r="4"  fill="#cce0f5"/>
+          <!-- Labels -->
+          <text x="10"  y="114" fill="#3a5a7a" font-family="JetBrains Mono" font-size="8">LOW</text>
+          <text x="163" y="114" fill="#3a5a7a" font-family="JetBrains Mono" font-size="8">HIGH</text>
+        </svg>
+        <div class="risk-badge" id="riskBadge" style="color:var(--textDim);border-color:var(--border);background:transparent">— AWAITING —</div>
+        <div class="meter-sub" id="riskSub">Enter signal values above</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mini stats -->
+  <div class="mini-row">
+    <div class="mini-card"><div class="mini-lbl">Quantity</div><div class="mini-val" id="outQty">—</div></div>
+    <div class="mini-card"><div class="mini-lbl">SL Distance</div><div class="mini-val" id="outSlDist" style="color:var(--red)">—</div></div>
+    <div class="mini-card"><div class="mini-lbl">R:R Ratio</div><div class="mini-val" id="outRR" style="color:var(--gold)">—</div></div>
+    <div class="mini-card"><div class="mini-lbl">Break-even Move</div><div class="mini-val" id="outBE">—</div></div>
+  </div>
+
+  <!-- P&L table -->
+  <div class="panel">
+    <div class="panel-hdr"><div class="phd-dot"></div>Predicted P&amp;L at Signal Targets</div>
+    <table class="pnl-tbl">
+      <thead>
+        <tr>
+          <th>Target</th>
+          <th>Price Movement</th>
+          <th>Close %</th>
+          <th>Profit (USDT)</th>
+          <th>Return on Margin</th>
+          <th class="bar-cell">Scale</th>
+        </tr>
+      </thead>
+      <tbody id="pnlBody">
+        <tr><td colspan="6" style="text-align:center;padding:24px;color:var(--textDim);font-size:10px">Enter entry + SL + at least one TP to see P&amp;L predictions</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</div><!-- /wrap -->
+
+<script>
+// ── STATE ─────────────────────────────────────────────────────────────────
+let direction = 'LONG';
+
+// ── FETCH LIVE WEEX BALANCE ───────────────────────────────────────────────
+async function fetchBalance(){
+  const dot  = document.getElementById('liveDot');
+  const disp = document.getElementById('balDisplay');
+  const src  = document.getElementById('balSrc');
+  disp.textContent = 'Fetching…';
+  disp.style.color = 'var(--textDim)';
+  try{
+    const res  = await fetch('http://127.0.0.1:8000/balance', {signal: AbortSignal.timeout(4000)});
+    const data = await res.json();
+    const usdt = data.balance?.USDT || data.USDT || {};
+    const free = usdt.free > 0 ? usdt.free : (usdt.total || 0);
+    if(free > 0){
+      document.getElementById('wallet').value = free.toFixed(2);
+      disp.textContent = '$' + free.toFixed(2);
+      disp.style.color = 'var(--cyan)';
+      dot.style.background = 'var(--green)';
+      dot.style.boxShadow  = '0 0 10px var(--green)';
+      if(src){ src.textContent = '● live WEEX'; src.style.color = 'var(--green)'; }
+      recalc();
+    } else {
+      disp.textContent = 'No data';
+      dot.style.background = 'var(--gold)';
+      if(src){ src.textContent = 'manual'; src.style.color = 'var(--gold)'; }
+    }
+  } catch(e){
+    disp.textContent = 'Offline';
+    disp.style.color = 'var(--red)';
+    dot.style.background = 'var(--red)';
+    dot.style.boxShadow  = '0 0 10px var(--red)';
+    dot.style.animation  = 'none';
+    if(src){ src.textContent = '✕ manual'; src.style.color = 'var(--red)'; }
+  }
+}
+
+// ── DIRECTION ─────────────────────────────────────────────────────────────
+function setDir(d){
+  direction = d;
+  document.getElementById('btnLong').classList.toggle('active', d === 'LONG');
+  document.getElementById('btnShort').classList.toggle('active', d === 'SHORT');
+  recalc();
+}
+
+// ── PRESETS ───────────────────────────────────────────────────────────────
+function setPreset(p){
+  const map = {cons:{risk:1.0,conf:75}, bal:{risk:1.5,conf:68}, agg:{risk:2.0,conf:60}};
+  const s = map[p];
+  document.getElementById('riskPct').value    = s.risk;
+  document.getElementById('confSlider').value = s.conf;
+  recalc();
+}
+
+// ── FORMAT ────────────────────────────────────────────────────────────────
+function fmtU(v){
+  if(v >= 10000) return '$' + v.toFixed(0);
+  if(v >= 100)   return '$' + v.toFixed(1);
+  return '$' + v.toFixed(2);
+}
+function fmtP(v){
+  v = parseFloat(v);
+  if(v >= 10000) return v.toFixed(1);
+  if(v >= 100)   return v.toFixed(2);
+  if(v >= 1)     return v.toFixed(4);
+  return v.toFixed(6);
+}
+function flash(id, text){
+  const el = document.getElementById(id);
+  if(!el) return;
+  el.textContent = text;
+  el.classList.remove('flash');
+  void el.offsetWidth;
+  el.classList.add('flash');
+}
+
+// ── CONFIDENCE UI ─────────────────────────────────────────────────────────
+function updateConfUI(){
+  const conf = parseInt(document.getElementById('confSlider').value);
+  const big  = document.getElementById('confBig');
+  const tag  = document.getElementById('confTag');
+  big.textContent = conf + '%';
+  if(conf >= 85){
+    big.style.color = 'var(--green)';
+    tag.textContent = 'STRONG — HIGH PRIORITY';
+    tag.style.cssText = 'color:var(--green);border-color:rgba(0,255,136,.35);background:rgba(0,255,136,.07)';
+  } else if(conf >= 72){
+    big.style.color = 'var(--green)';
+    tag.textContent = 'CONFIRMED — GOOD SETUP';
+    tag.style.cssText = 'color:var(--green);border-color:rgba(0,255,136,.25);background:rgba(0,255,136,.05)';
+  } else if(conf >= 60){
+    big.style.color = 'var(--gold)';
+    tag.textContent = 'MODERATE — PROCEED WITH CARE';
+    tag.style.cssText = 'color:var(--gold);border-color:rgba(255,204,0,.35);background:rgba(255,204,0,.07)';
+  } else {
+    big.style.color = 'var(--red)';
+    tag.textContent = 'WEAK — HIGH CAUTION';
+    tag.style.cssText = 'color:var(--red);border-color:rgba(255,68,102,.35);background:rgba(255,68,102,.07)';
+  }
+}
+
+// ── RISK METER ────────────────────────────────────────────────────────────
+// Arc length for semicircle r=82: π × 82 ≈ 257.6
+const ARC_LEN = 257.6;
+function updateMeter(riskFrac){ // 0 = safe, 1 = extreme
+  const f = Math.max(0, Math.min(1, riskFrac));
+  document.getElementById('arcActive').style.strokeDashoffset = ARC_LEN * (1 - f);
+  // Needle: angle 180° (left=0) → 0° (right=1)
+  const deg = 180 - f * 180;
+  const rad = deg * Math.PI / 180;
+  const x2  = (100 + 76 * Math.cos(rad)).toFixed(2);
+  const y2  = (100 - 76 * Math.sin(rad)).toFixed(2);
+  const n   = document.getElementById('arcNeedle');
+  n.setAttribute('x2', x2);
+  n.setAttribute('y2', y2);
+}
+
+// ── MAIN CALCULATION ──────────────────────────────────────────────────────
+function recalc(){
+  updateConfUI();
+
+  const wallet  = parseFloat(document.getElementById('wallet').value)   || 0;
+  const riskPct = parseFloat(document.getElementById('riskPct').value)   || 1.5;
+  const entry   = parseFloat(document.getElementById('entry').value)     || 0;
+  const sl      = parseFloat(document.getElementById('sl').value)        || 0;
+  const tp1     = parseFloat(document.getElementById('tp1').value)       || 0;
+  const tp2     = parseFloat(document.getElementById('tp2').value)       || 0;
+  const tp3     = parseFloat(document.getElementById('tp3').value)       || 0;
+  const conf    = parseInt(document.getElementById('confSlider').value);
+
+  // SL distance hint
+  const slHintEl = document.getElementById('slHint');
+  if(entry && sl && slHintEl){
+    const d = Math.abs(entry - sl) / entry * 100;
+    slHintEl.textContent = d.toFixed(2) + '% away';
+    slHintEl.style.color = d > 5 ? 'var(--orange)' : 'var(--textDim)';
+  }
+
+  if(!entry || !sl || !wallet){ resetOut(); return; }
+
+  const dir     = direction === 'LONG' ? 1 : -1;
+  const slDist  = Math.abs(entry - sl) / entry;      // decimal
+  const slDistP = slDist * 100;                       // percent
+
+  // Validate SL direction
+  const slOk = direction === 'LONG' ? sl < entry : sl > entry;
+  document.getElementById('sl').classList.toggle('err-field', !slOk);
+  document.getElementById('sl').classList.toggle('valid',     slOk);
+
+  if(!slOk){ resetOut(); return; }
+
+  // ── Leverage formula ───────────────────────────────────────────────────
+  // raw = risk_pct / sl_dist_pct  → ensures maxLoss = exactly risk_pct% of wallet
+  const rawLev    = riskPct / slDistP;
+  const confMult  = conf >= 85 ? 1.0 : conf >= 72 ? 0.85 : conf >= 60 ? 0.7 : 0.5;
+  const effLev    = Math.max(1, Math.min(20, Math.round(rawLev * confMult)));
+
+  // ── Sizing ─────────────────────────────────────────────────────────────
+  const margin  = wallet * riskPct / 100;
+  const posSize = margin * effLev;
+  const qty     = posSize / entry;
+
+  // ── R:R ────────────────────────────────────────────────────────────────
+  let rr = null;
+  if(tp1){
+    const tp1Dist = Math.abs(tp1 - entry);
+    const slDist_ = Math.abs(entry - sl);
+    rr = tp1Dist / slDist_;
+  }
+
+  // ── Outputs ────────────────────────────────────────────────────────────
+  flash('outLev',    effLev + 'x');
+  flash('outMargin', fmtU(margin));
+  flash('outPos',    fmtU(posSize));
+  flash('outQty',    qty >= 1 ? qty.toFixed(4) : qty.toFixed(6));
+  flash('outSlDist', slDistP.toFixed(2) + '%');
+  flash('outRR',     rr ? '1 : ' + rr.toFixed(2) : '—');
+  flash('outBE',     slDistP.toFixed(2) + '%');
+
+  // Leverage colour
+  const levEl = document.getElementById('outLev');
+  const card  = document.getElementById('cardLev');
+  if(effLev <= 3){
+    levEl.className = 'oc-val glow-cyan';
+    card.className  = 'out-card';
+  } else if(effLev <= 7){
+    levEl.className = 'oc-val glow-green';
+    card.className  = 'out-card green-accent';
+  } else if(effLev <= 12){
+    levEl.className = 'oc-val glow-gold';
+    card.className  = 'out-card gold-accent';
+  } else {
+    levEl.className = 'oc-val glow-red';
+    card.className  = 'out-card red-accent';
+  }
+
+  document.getElementById('outLevSub').textContent  = `conf mult ×${confMult} | raw ${rawLev.toFixed(1)}x`;
+  document.getElementById('outMarginSub').textContent = `${riskPct}% of $${wallet.toFixed(2)}`;
+  document.getElementById('outPosSub').textContent    = `${effLev}x margin`;
+
+  // ── Risk badge ─────────────────────────────────────────────────────────
+  const badge = document.getElementById('riskBadge');
+  const sub   = document.getElementById('riskSub');
+  const rFrac = (effLev - 1) / 19;
+  if(effLev <= 3){
+    badge.textContent = 'SAFE';
+    badge.style.cssText='color:var(--green);border-color:rgba(0,255,136,.4);background:rgba(0,255,136,.08)';
+    sub.textContent = `${effLev}x — capital well preserved`;
+  } else if(effLev <= 7){
+    badge.textContent = 'MODERATE';
+    badge.style.cssText='color:var(--cyan);border-color:rgba(0,212,255,.4);background:rgba(0,212,255,.07)';
+    sub.textContent = `${effLev}x — manageable risk`;
+  } else if(effLev <= 12){
+    badge.textContent = 'HIGH RISK';
+    badge.style.cssText='color:var(--gold);border-color:rgba(255,204,0,.4);background:rgba(255,204,0,.07)';
+    sub.textContent = `${effLev}x — tight SL essential`;
+  } else {
+    badge.textContent = 'EXTREME';
+    badge.style.cssText='color:var(--red);border-color:rgba(255,68,102,.4);background:rgba(255,68,102,.08)';
+    sub.textContent = `${effLev}x — consider reducing`;
+  }
+  updateMeter(rFrac);
+
+  // ── P&L table ──────────────────────────────────────────────────────────
+  const maxLoss = posSize * slDist;
+
+  const targets = [
+    {label:'TP1', price:tp1, closePct:'40%', frac:0.4},
+    {label:'TP2', price:tp2, closePct:'40%', frac:0.4},
+    {label:'TP3', price:tp3, closePct:'20%', frac:0.2},
+  ].filter(t => t.price > 0);
+
+  const totalProfit = targets.reduce((s, t) => {
+    return s + posSize * Math.abs(t.price - entry) / entry * t.frac;
+  }, 0);
+
+  let rows = targets.map(t => {
+    const movePct  = (t.price - entry) / entry * 100;
+    const profit   = posSize * Math.abs(t.price - entry) / entry * t.frac;
+    const retOnMgn = profit / margin * 100;
+    const barW     = Math.min(100, profit / (totalProfit || 1) * 100);
+    const tpOk     = direction === 'LONG' ? t.price > entry : t.price < entry;
+    const col      = tpOk ? 'var(--green)' : 'var(--red)';
+    return `<tr>
+      <td class="td-label" style="color:${col}">${t.label}</td>
+      <td class="td-dist">${fmtP(entry)} → ${fmtP(t.price)}<br><span style="color:${col}">${movePct>=0?'+':''}${movePct.toFixed(2)}%</span></td>
+      <td class="td-close">${t.closePct}</td>
+      <td class="td-usdt" style="color:${col}">+${fmtU(profit)}</td>
+      <td class="td-pct" style="color:${col}">+${retOnMgn.toFixed(1)}%</td>
+      <td class="bar-cell"><div class="bar-bg"><div class="bar-fill" style="width:${barW.toFixed(1)}%;background:${col}"></div></div></td>
+    </tr>`;
+  }).join('');
+
+  // SL row
+  const lossRet = maxLoss / margin * 100;
+  rows += `<tr style="border-top:1px solid rgba(255,68,102,.18)">
+    <td class="td-label" style="color:var(--red)">SL MAX LOSS</td>
+    <td class="td-dist">${fmtP(entry)} → ${fmtP(sl)}<br><span style="color:var(--red)">-${slDistP.toFixed(2)}%</span></td>
+    <td class="td-close">100%</td>
+    <td class="td-usdt" style="color:var(--red)">-${fmtU(maxLoss)}</td>
+    <td class="td-pct" style="color:var(--red)">-${lossRet.toFixed(1)}%</td>
+    <td class="bar-cell"><div class="bar-bg"><div class="bar-fill" style="width:100%;background:var(--red)"></div></div></td>
+  </tr>`;
+
+  // Best case row
+  if(targets.length > 0){
+    const totalRet = totalProfit / margin * 100;
+    rows += `<tr style="background:rgba(255,204,0,.03)">
+      <td class="td-label" style="color:var(--gold)">FULL SWEEP</td>
+      <td class="td-dist" style="color:var(--textDim)">All TPs hit</td>
+      <td class="td-close" style="color:var(--textDim)">100%</td>
+      <td class="td-usdt" style="color:var(--gold)">+${fmtU(totalProfit)}</td>
+      <td class="td-pct" style="color:var(--gold)">+${totalRet.toFixed(1)}%</td>
+      <td class="bar-cell"><div class="bar-bg"><div class="bar-fill" style="width:100%;background:var(--gold)"></div></div></td>
+    </tr>`;
+  }
+
+  document.getElementById('pnlBody').innerHTML = rows;
+}
+
+// ── RESET ─────────────────────────────────────────────────────────────────
+function resetOut(){
+  ['outLev','outMargin','outPos','outQty','outSlDist','outRR','outBE'].forEach(id=>{
+    const e = document.getElementById(id);
+    if(e) e.textContent = '—';
+  });
+  document.getElementById('pnlBody').innerHTML =
+    '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--textDim);font-size:10px">Enter entry + SL + wallet to see results</td></tr>';
+  updateMeter(0);
+  const b = document.getElementById('riskBadge');
+  b.textContent='— AWAITING —';
+  b.style.cssText='color:var(--textDim);border-color:var(--border);background:transparent';
+  document.getElementById('riskSub').textContent='Enter signal values above';
+}
+
+// ── INIT ──────────────────────────────────────────────────────────────────
+fetchBalance();
+updateConfUI();
+resetOut();
+setInterval(fetchBalance, 30000);
+</script>
+</body>
+</html>
