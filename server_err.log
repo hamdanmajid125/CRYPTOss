@@ -1,0 +1,34 @@
+INFO:     Started server process [25272]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     ('127.0.0.1', 61778) - "WebSocket /ws/signals" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 61787) - "WebSocket /ws/signals" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 61808) - "WebSocket /ws/signals" [accepted]
+INFO:     connection open
+Task exception was never retrieved
+future: <Task finished name='Task-116' coro=<IocpProactor.accept.<locals>.accept_coro() done, defined at C:\Users\Hamdan\AppData\Local\Programs\Python\Python38\lib\asyncio\windows_events.py:563> exception=OSError(22, 'The specified network name is no longer available', None, 64, None)>
+Traceback (most recent call last):
+  File "C:\Users\Hamdan\AppData\Local\Programs\Python\Python38\lib\asyncio\windows_events.py", line 566, in accept_coro
+    await future
+  File "C:\Users\Hamdan\AppData\Local\Programs\Python\Python38\lib\asyncio\windows_events.py", line 812, in _poll
+    value = callback(transferred, key, ov)
+  File "C:\Users\Hamdan\AppData\Local\Programs\Python\Python38\lib\asyncio\windows_events.py", line 555, in finish_accept
+    ov.getresult()
+OSError: [WinError 64] The specified network name is no longer available
+Accept failed on a socket
+socket: <asyncio.TransportSocket fd=2700, family=AddressFamily.AF_INET, type=SocketKind.SOCK_STREAM, proto=6, laddr=('127.0.0.1', 8000)>
+Traceback (most recent call last):
+  File "C:\Users\Hamdan\AppData\Local\Programs\Python\Python38\lib\asyncio\proactor_events.py", line 818, in loop
+    conn, addr = f.result()
+  File "C:\Users\Hamdan\AppData\Local\Programs\Python\Python38\lib\asyncio\windows_events.py", line 566, in accept_coro
+    await future
+  File "C:\Users\Hamdan\AppData\Local\Programs\Python\Python38\lib\asyncio\windows_events.py", line 812, in _poll
+    value = callback(transferred, key, ov)
+  File "C:\Users\Hamdan\AppData\Local\Programs\Python\Python38\lib\asyncio\windows_events.py", line 555, in finish_accept
+    ov.getresult()
+OSError: [WinError 64] The specified network name is no longer available
+INFO:     connection closed
+INFO:     connection closed

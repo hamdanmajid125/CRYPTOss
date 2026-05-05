@@ -491,6 +491,12 @@ async def update_settings(body: Dict):
     return {'ok': True, 'auto_trade': AUTO_TRADE, 'scan_interval': SCAN_INTERVAL,
             'top_n_coins': TOP_N_COINS, 'settings': risk.settings.__dict__}
 
+@app.get('/weex/test')
+async def test_weex():
+    """Test WEEX API credentials and connectivity."""
+    result = weex.test_connection()
+    return result
+
 @app.get('/pumps')
 async def get_pumps():
     """Returns current pump/dump movers — coins with unusual volume+price spikes."""
@@ -576,6 +582,25 @@ async def manual_trade(body: Dict):
         log_trade(f"MANUAL | {action} {qty} {sym} @ {entry} | SL:{sl} TP1:{tp1} | lev:{leverage or 'risk-based'}")
     return {'executed': bool(result), 'order': result, 'sizing': sizing}
 
+@app.post('/backtest/{symbol:path}')
+async def run_backtest(symbol: str):
+    """Run a backtest for a symbol using historical OHLCV data."""
+    try:
+        from backtest import Backtester
+        ex_symbol   = symbol.replace('-', '/').upper()
+        initial_cap = risk.settings.account_usdt or 10_000.0
+        bt = Backtester(feed, ex_symbol, timeframe='1h', initial_capital=initial_cap)
+        results = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: bt.run(lookback_candles=500)
+        )
+        # Downsample equity curve so the JSON response stays compact
+        ec   = results.get('equity_curve', [])
+        step = max(1, len(ec) // 100)
+        results['equity_curve'] = ec[::step]
+        return results
+    except Exception as e:
+        return JSONResponse({'error': str(e)}, status_code=500)
+
 @app.post('/webhook/tradingview')
 async def tradingview_webhook(payload: Dict):
     symbol = payload.get('symbol', '').replace('USDT', '/USDT').upper()
@@ -647,7 +672,7 @@ if __name__ == '__main__':
     print(f'  Min Confidence: 72%')
     print('  Listening    : http://127.0.0.1:8000')
     print('  Dashboard    : open trading_dashboard.html')
-    print('  ✅ NO MANUAL SCAN BUTTON NEEDED — fully automatic')
+    print('  >> NO MANUAL SCAN BUTTON NEEDED -- fully automatic')
     print('=' * 60)
     uvicorn.run(app, host=os.getenv('HOST', '127.0.0.1'),
                 port=int(os.getenv('PORT', '8000')))

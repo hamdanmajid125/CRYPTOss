@@ -1130,12 +1130,14 @@ async function executeModalTrade(){
 
   try{
     const url = $('backendUrl').value;
+    console.log('[executeModalTrade] Sending to', url + '/trade/execute', JSON.stringify(signal));
     const res = await fetch(url + '/trade/execute', {
       method:  'POST',
       headers: {'Content-Type': 'application/json'},
       body:    JSON.stringify({signal}),
     });
     const data = await res.json();
+    console.log('[executeModalTrade] Response (HTTP ' + res.status + '):', JSON.stringify(data));
 
     if(data.executed){
       const tc = t.action === 'LONG' ? 'LONG' : 'SHORT';
@@ -1153,6 +1155,7 @@ async function executeModalTrade(){
       showToast('LOSS', '❌ Trade rejected', data.reason || 'Risk check failed — check RISK tab');
     }
   } catch(e){
+    console.error('[executeModalTrade] Fetch error:', e);
     btn.disabled    = false;
     btn.textContent = t.action === 'SHORT' ? '⬇ EXECUTE SHORT' : '⬆ EXECUTE LONG';
     showToast('LOSS', '❌ Error', 'Backend not reachable: ' + e.message);

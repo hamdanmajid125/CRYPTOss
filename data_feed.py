@@ -4,7 +4,6 @@ import pandas_ta_classic as ta
 import requests
 import time
 import xml.etree.ElementTree as ET
-from scipy.signal import find_peaks
 from utils import with_retry
 
 class DataFeed:
@@ -75,6 +74,12 @@ class DataFeed:
     def get_ohlcv(self, symbol: str, timeframe: str = '1h', limit: int = 350) -> pd.DataFrame:
         raw = with_retry(lambda: self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit))
         df = pd.DataFrame(raw, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        # Force all price/volume columns to float64 — exchanges can return None
+        # for thinly-traded or newly-listed tokens, which would stay as Python
+        # None in an object-dtype column and break arithmetic downstream.
+        for col in ('open', 'high', 'low', 'close', 'volume'):
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+        df.dropna(subset=['open', 'high', 'low', 'close'], inplace=True)
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         df.set_index('timestamp', inplace=True)
         return df
@@ -211,30 +216,32 @@ class DataFeed:
     # RSI DIVERGENCE
     # ─────────────────────────────────────────────────────────────────────
     def detect_rsi_divergence(self, df: pd.DataFrame) -> str:
-        """Proper pivot-based RSI divergence using scipy.signal.find_peaks."""
-        if len(df) < 30:
+        if len(df) < 25:
+            return 'NONE'
+        recent_window = df.tail(5)
+        prev_window = df.iloc[-20:-5]
+        if recent_window.empty or prev_window.empty:
             return 'NONE'
         try:
-            recent = df.tail(50).copy()
-            prices = recent['close'].values
-            rsi    = recent['rsi'].fillna(50).values
+            recent_high_idx = recent_window['close'].idxmax()
+            prev_high_idx = prev_window['close'].idxmax()
+            recent_low_idx = recent_window['close'].idxmin()
+            prev_low_idx = prev_window['close'].idxmin()
 
-            price_highs, _ = find_peaks(prices,  prominence=0, distance=5)
-            price_lows,  _ = find_peaks(-prices, prominence=0, distance=5)
-            rsi_highs,   _ = find_peaks(rsi,     prominence=0, distance=5)
-            rsi_lows,    _ = find_peaks(-rsi,    prominence=0, distance=5)
+            recent_high_price = recent_window.loc[recent_high_idx, 'close']
+            prev_high_price = prev_window.loc[prev_high_idx, 'close']
+            recent_high_rsi = recent_window.loc[recent_high_idx, 'rsi']
+            prev_high_rsi = prev_window.loc[prev_high_idx, 'rsi']
 
-            if len(price_highs) >= 2 and len(rsi_highs) >= 2:
-                ph1, ph2 = price_highs[-2], price_highs[-1]
-                rh1, rh2 = rsi_highs[-2],   rsi_highs[-1]
-                if prices[ph2] > prices[ph1] and rsi[rh2] < rsi[rh1]:
-                    return 'BEARISH DIVERGENCE — price up, RSI down, reversal likely'
+            recent_low_price = recent_window.loc[recent_low_idx, 'close']
+            prev_low_price = prev_window.loc[prev_low_idx, 'close']
+            recent_low_rsi = recent_window.loc[recent_low_idx, 'rsi']
+            prev_low_rsi = prev_window.loc[prev_low_idx, 'rsi']
 
-            if len(price_lows) >= 2 and len(rsi_lows) >= 2:
-                pl1, pl2 = price_lows[-2], price_lows[-1]
-                rl1, rl2 = rsi_lows[-2],   rsi_lows[-1]
-                if prices[pl2] < prices[pl1] and rsi[rl2] > rsi[rl1]:
-                    return 'BULLISH DIVERGENCE — price down, RSI up, reversal likely'
+            if recent_high_price > prev_high_price and recent_high_rsi < prev_high_rsi:
+                return 'BEARISH'
+            if recent_low_price < prev_low_price and recent_low_rsi > prev_low_rsi:
+                return 'BULLISH'
         except Exception:
             pass
         return 'NONE'
@@ -249,43 +256,34 @@ class DataFeed:
         return {'bsl': bsl, 'ssl': ssl}
 
     def find_order_blocks(self, df: pd.DataFrame) -> list:
-        """Detect order blocks with mitigation check and respect_count."""
         obs = []
         for i in range(5, len(df) - 3):
-            candle    = df.iloc[i]
+            candle = df.iloc[i]
             body_size = abs(candle['close'] - candle['open']) / candle['open']
             if body_size > 0.004:
                 next3 = df.iloc[i + 1:i + 4]
-                move  = (next3['close'].iloc[-1] - candle['close']) / candle['close']
-                if abs(move) > 0.008:
-                    ob_price = float(candle['open'])
-                    ob_type  = 'bullish' if candle['close'] > candle['open'] else 'bearish'
-
-                    # Check mitigation on subsequent candles after OB formation
-                    subsequent  = df.iloc[i + 4:]
-                    mitigated   = False
-                    respect_count = 0
-                    for _, sc in subsequent.iterrows():
-                        if ob_type == 'bullish':
-                            if sc['close'] < ob_price:
-                                mitigated = True
-                                break
-                            if sc['low'] <= ob_price * 1.005:
-                                respect_count += 1
-                        else:
-                            if sc['close'] > ob_price:
-                                mitigated = True
-                                break
-                            if sc['high'] >= ob_price * 0.995:
-                                respect_count += 1
-
-                    if not mitigated:
+                move = (next3['close'].iloc[-1] - candle['close']) / candle['close']
+                if move > 0.008:
+                    # Bullish OB = last BEARISH candle before upward move (demand zone)
+                    # Zone: candle low → candle high; key entry level = candle open (top of body)
+                    if candle['close'] < candle['open']:
                         obs.append({
-                            'price':         ob_price,
-                            'type':          ob_type,
-                            'time':          str(df.index[i]),
-                            'mitigated':     False,
-                            'respect_count': respect_count,
+                            'price': float(candle['open']),   # top of bearish body = entry trigger
+                            'top':   float(candle['high']),
+                            'bot':   float(candle['low']),
+                            'type':  'bullish',
+                            'time':  str(df.index[i]),
+                        })
+                elif move < -0.008:
+                    # Bearish OB = last BULLISH candle before downward move (supply zone)
+                    # Zone: candle low → candle high; key entry level = candle open (bottom of body)
+                    if candle['close'] > candle['open']:
+                        obs.append({
+                            'price': float(candle['open']),   # bottom of bullish body = entry trigger
+                            'top':   float(candle['high']),
+                            'bot':   float(candle['low']),
+                            'type':  'bearish',
+                            'time':  str(df.index[i]),
                         })
         return obs[-3:]
 
@@ -304,7 +302,8 @@ class DataFeed:
                 filled   = False
                 max_fill = 0.0
                 for _, sc in subsequent.iterrows():
-                    if sc['close'] <= bot:
+                    # Bull FVG filled when any wick enters the gap (low, not close)
+                    if sc['low'] <= bot:
                         filled = True
                         break
                     fill_down = top - max(float(sc['low']), bot)
@@ -320,7 +319,8 @@ class DataFeed:
                 filled   = False
                 max_fill = 0.0
                 for _, sc in subsequent.iterrows():
-                    if sc['close'] >= top:
+                    # Bear FVG filled when any wick enters the gap (high, not close)
+                    if sc['high'] >= top:
                         filled = True
                         break
                     fill_up  = min(float(sc['high']), top) - bot
@@ -642,9 +642,12 @@ class DataFeed:
                     biases[tf] = 'NEUTRAL'
                     continue
                 last = df.iloc[-1]
-                if last['close'] > last['ema20'] > last['ema50'] and last['rsi'] > 50:
+                lookback = min(5, len(df) - 1)
+                ema20_prev = float(df.iloc[-(lookback + 1)]['ema20'])
+                slope_up   = float(last['ema20']) > ema20_prev
+                if last['close'] > last['ema20'] > last['ema50'] and slope_up:
                     biases[tf] = 'BULLISH'
-                elif last['close'] < last['ema20'] < last['ema50'] and last['rsi'] < 50:
+                elif last['close'] < last['ema20'] < last['ema50'] and not slope_up:
                     biases[tf] = 'BEARISH'
                 else:
                     biases[tf] = 'NEUTRAL'

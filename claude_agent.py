@@ -9,17 +9,18 @@ class ClaudeAgent:
     def __init__(self, api_key: str):
         self.client = anthropic.Anthropic(api_key=api_key)
         self.model_fast = 'claude-sonnet-4-6'
-        self.model_deep = 'claude-opus-4-7'
+        self.model_deep = 'claude-opus-4-5-20251101'
 
     def _trading_session(self) -> str:
         hour = datetime.datetime.now(datetime.timezone.utc).hour
         if 8 <= hour < 12:
-            return 'London (high volatility, prefer trend trades)'
-        elif 13 <= hour < 21:
-            return 'New York (highest volume, best for breakouts)'
-        elif 0 <= hour < 8:
-            return 'Asia (lower volatility, range/grid strategies better)'
-        return 'London/NY Overlap (BEST session — highest confluence probability)'
+            return 'London'
+        elif 12 <= hour < 17:
+            return 'London/NY Overlap'
+        elif 17 <= hour < 21:
+            return 'NY'
+        else:
+            return 'Asia'
 
     def _score_confidence(self, data: dict, tf_bias: dict, fng: dict) -> int:
         score = 50
@@ -50,12 +51,12 @@ class ClaudeAgent:
         elif fng_val < 35 and overall == 'BULLISH': score += 6
         elif fng_val > 65 and overall == 'BEARISH': score += 6
 
-        # RSI positioning (avoid chasing overbought/oversold)
+        # RSI positioning — symmetric sweet spot 38-62 for both directions
         rsi = data.get('rsi', 50)
-        if overall == 'BULLISH' and 40 <= rsi <= 65: score += 10   # Sweet spot for longs
-        elif overall == 'BEARISH' and 35 <= rsi <= 60: score += 10  # Sweet spot for shorts
-        elif rsi > 78 and overall == 'BULLISH':  score -= 15  # Too overbought for longs
-        elif rsi < 22 and overall == 'BEARISH':  score -= 15  # Too oversold for shorts
+        if overall == 'BULLISH' and 38 <= rsi <= 62: score += 10
+        elif overall == 'BEARISH' and 38 <= rsi <= 62: score += 10
+        elif rsi > 75 and overall == 'BULLISH':  score -= 15  # Overbought, bad long entry
+        elif rsi < 25 and overall == 'BEARISH':  score -= 15  # Oversold, bad short entry
 
         # RSI Divergence (powerful reversal signal)
         rsi_div = data.get('rsi_divergence', 'NONE')
@@ -71,16 +72,41 @@ class ClaudeAgent:
         elif any(p in pattern for p in med_conf_patterns): score += 6
         elif 'Doji' in pattern:  score -= 5   # Indecision — wait
 
-        # SMC: FVG presence
-        fvgs = data.get('fvgs', [])
+        # SMC: FVG — direction-aware (being inside opposing FVG hurts, not helps)
+        fvgs  = data.get('fvgs', [])
         price = data.get('price', 0)
-        in_fvg = any(f['bot'] <= price <= f['top'] for f in fvgs)
-        if in_fvg: score += 8
+        in_bull_fvg = any(f['bot'] <= price <= f['top'] for f in fvgs if f.get('type') == 'bullish')
+        in_bear_fvg = any(f['bot'] <= price <= f['top'] for f in fvgs if f.get('type') == 'bearish')
+        if overall == 'BULLISH':
+            if in_bull_fvg: score += 10   # Price in demand FVG — good long entry
+            if in_bear_fvg: score -= 12   # Price in supply FVG — bad long entry
+        elif overall == 'BEARISH':
+            if in_bear_fvg: score += 10   # Price in supply FVG — good short entry
+            if in_bull_fvg: score -= 12   # Price in demand FVG — bad short entry
 
-        # SMC: near order block
+        # SMC: order block — direction-aware zone check
         obs = data.get('order_blocks', [])
-        near_ob = any(abs(o['price'] - price) / price < 0.005 for o in obs)
-        if near_ob: score += 8
+        for o in obs:
+            top = o.get('top', o['price'] * 1.001)
+            bot = o.get('bot', o['price'] * 0.999)
+            in_zone = bot <= price <= top
+            if not in_zone:
+                continue
+            if overall == 'BULLISH' and o['type'] == 'bullish':
+                score += 12   # Inside demand OB — ideal long entry
+            elif overall == 'BEARISH' and o['type'] == 'bearish':
+                score += 12   # Inside supply OB — ideal short entry
+            elif overall == 'BULLISH' and o['type'] == 'bearish':
+                score -= 12   # Inside supply OB — entering into resistance
+            elif overall == 'BEARISH' and o['type'] == 'bullish':
+                score -= 12   # Inside demand OB — entering into support
+
+        # 4H veto: strong timeframe contradiction overrides weaker agreement
+        per_tf = tf_bias.get('per_tf', {})
+        if per_tf.get('4h') == 'BEARISH' and overall == 'BULLISH':
+            score -= 25   # 4H bearish kills long bias
+        elif per_tf.get('4h') == 'BULLISH' and overall == 'BEARISH':
+            score -= 25   # 4H bullish kills short bias
 
         # EMA200 alignment (skip if not enough candle data)
         ema200 = data.get('ema200')
@@ -90,11 +116,13 @@ class ClaudeAgent:
             elif overall == 'BEARISH' and price < ema200: score += 5
             elif overall == 'BEARISH' and price > ema200: score -= 10
 
-        # MACD alignment
+        # MACD alignment — reward aligned, penalise opposing
         macd     = data.get('macd', 0)
         macd_sig = data.get('macd_sig', 0)
-        if overall == 'BULLISH' and macd > macd_sig: score += 5
+        if overall == 'BULLISH' and macd > macd_sig:   score += 5
         elif overall == 'BEARISH' and macd < macd_sig: score += 5
+        elif overall == 'BULLISH' and macd < macd_sig: score -= 8
+        elif overall == 'BEARISH' and macd > macd_sig: score -= 8
 
         return max(0, min(100, score))
 
@@ -285,25 +313,33 @@ Session: {self._trading_session()}
 ━━━ FINAL DECISION RULES (READ CAREFULLY) ━━━
 ✅ OUTPUT LONG ONLY IF ALL TRUE:
    - TF overall = BULLISH (≥ 2/3 agree)
-   - RSI < 70 (not overbought)
-   - MACD bullish or turning bullish
+   - 4h bias is NOT BEARISH (4H veto — BULLISH or NEUTRAL only)
+   - RSI < 75 (not overbought) and ideally between 38-62 for pullback entry
+   - MACD bullish or turning bullish (not opposing)
    - Volume HIGH or NORMAL (not VERY LOW)
-   - At least one: OB, FVG, or candle pattern confirming
+   - Price at or near a BULLISH OB or BULL FVG (not inside a supply zone)
+   - At least one: bullish OB, bull FVG, or bullish candle pattern confirming
    - Final confidence ≥ 72
 
 ✅ OUTPUT SHORT ONLY IF ALL TRUE:
    - TF overall = BEARISH (≥ 2/3 agree)
-   - RSI > 30 (not oversold)
-   - MACD bearish or turning bearish
+   - 4h bias is NOT BULLISH (4H veto — BEARISH or NEUTRAL only)
+   - RSI > 25 (not oversold) and ideally between 38-62 for pullback entry
+   - MACD bearish or turning bearish (not opposing)
    - Volume HIGH or NORMAL (not VERY LOW)
-   - At least one: OB, FVG, or candle pattern confirming
+   - Price at or near a BEARISH OB or BEAR FVG (not inside a demand zone)
+   - At least one: bearish OB, bear FVG, or bearish candle pattern confirming
    - Final confidence ≥ 72
 
 ⛔ OUTPUT WAIT IF ANY:
    - TF overall = MIXED
+   - 4h bias CONTRADICTS the overall direction (e.g., overall BULLISH but 4h BEARISH)
    - Volume = VERY LOW
-   - RSI > 78 and signal is LONG
-   - RSI < 22 and signal is SHORT
+   - RSI > 75 and signal is LONG (chasing overbought)
+   - RSI < 25 and signal is SHORT (chasing oversold)
+   - Price inside a SUPPLY OB/FVG and signal is LONG
+   - Price inside a DEMAND OB/FVG and signal is SHORT
+   - MACD opposes the trade direction
    - Doji candle with no other confluence
    - Confidence < 72
    - You are unsure — WHEN IN DOUBT, WAIT. A skipped trade is NOT a lost trade.

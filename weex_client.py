@@ -1,4 +1,8 @@
+import base64
 import ccxt
+import hashlib
+import hmac
+import requests
 import time
 import uuid
 import json
@@ -7,23 +11,91 @@ from utils import with_retry
 
 
 class WeexClient:
+    BASE_URL = 'https://api-contract.weex.com'
+
     def __init__(self, api_key: str, secret: str, passphrase: str, paper: bool = True):
-        self.paper = paper
+        self.paper      = paper
+        self.api_key    = api_key.strip()
+        self.secret     = secret.strip()
+        self.passphrase = passphrase.strip()
+
         self.exchange = ccxt.weex({
-            'apiKey': api_key,
-            'secret': secret,
+            'apiKey':   api_key,
+            'secret':   secret,
             'password': passphrase,
-            'options': {'defaultType': 'swap'},
+            'options':  {'defaultType': 'swap'},
         })
         # Public Binance for price feeds (works in both paper and live mode)
         self._public = ccxt.binance({'enableRateLimit': True, 'options': {'defaultType': 'spot'}})
 
         # Paper trading state
-        self._paper_balance = 10000.0  # paper-mode simulated balance
+        self._paper_balance    = 10000.0
         self._paper_positions: List[Dict] = []
-        # order IDs now use uuid.hex[:8] — no counter needed
 
         print(f'[WEEX] Initialized — paper={paper}')
+
+    # ── RAW HTTP LAYER (HMAC-SHA256) ───────────────────────────────────────────
+
+    def _sign(self, timestamp: str, method: str, path: str, body: str = '') -> str:
+        """HMAC-SHA256 base64 of: timestamp + METHOD + path + body."""
+        message = timestamp + method.upper() + path + body
+        raw = hmac.new(
+            self.secret.encode('utf-8'),
+            message.encode('utf-8'),
+            hashlib.sha256,
+        ).digest()
+        return base64.b64encode(raw).decode('utf-8')
+
+    def _request(self, method: str, path: str, data: Optional[Dict] = None) -> Optional[Dict]:
+        """Direct signed HTTP call. Returns parsed JSON or None."""
+        ts   = str(int(time.time() * 1000))
+        body = json.dumps(data) if data else ''
+        sign = self._sign(ts, method, path, body)
+        headers = {
+            'ACCESS-KEY':        self.api_key,
+            'ACCESS-SIGN':       sign,
+            'ACCESS-TIMESTAMP':  ts,
+            'ACCESS-PASSPHRASE': self.passphrase,
+            'Content-Type':      'application/json',
+        }
+        url = self.BASE_URL + path
+        try:
+            if method.upper() == 'GET':
+                resp = requests.get(url, headers=headers, timeout=10)
+            else:
+                resp = requests.post(url, headers=headers, data=body, timeout=10)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            print(f'[Weex] HTTP {method} {path} failed: {type(e).__name__}: {e}')
+            import traceback; traceback.print_exc()
+            return None
+
+    def _get(self, path: str) -> Optional[Dict]:
+        return self._request('GET', path)
+
+    def _post(self, path: str, data: Optional[Dict] = None) -> Optional[Dict]:
+        return self._request('POST', path, data)
+
+    # ── CONNECTION TEST ────────────────────────────────────────────────────────
+
+    def test_connection(self) -> dict:
+        """Test API credentials and connectivity. Returns status dict."""
+        if self.paper:
+            return {'status': 'paper_mode', 'connected': True,
+                    'message': 'Paper trading — no real API needed'}
+        try:
+            result = self._get('/capi/v3/account/balance')
+            if result is None:
+                return {'status': 'error', 'connected': False, 'response': None}
+            # API may return a list of balances or a dict with a 'balances' key
+            if isinstance(result, list):
+                return {'status': 'ok', 'connected': True, 'balance': result}
+            if isinstance(result, dict) and 'msg' not in result:
+                return {'status': 'ok', 'connected': True, 'balance': result.get('balances', result)}
+            return {'status': 'error', 'connected': False, 'response': result}
+        except Exception as e:
+            return {'status': 'exception', 'connected': False, 'error': str(e)}
 
     # ── BALANCE ────────────────────────────────────────────────────────────────
 
@@ -55,7 +127,8 @@ class WeexClient:
                 'paper': False,
             }
         except Exception as e:
-            print(f'[WEEX] Balance fetch failed: {e}')
+            print(f'[Weex] FULL ERROR: {type(e).__name__}: {e}')
+            import traceback; traceback.print_exc()
             return {'error': str(e), 'USDT': {'free': 0, 'used': 0, 'total': 0}}
 
     # ── POSITIONS ──────────────────────────────────────────────────────────────
@@ -253,7 +326,8 @@ class WeexClient:
 
             return order
         except Exception as e:
-            print(f'[WEEX] Order failed: {e}')
+            print(f'[Weex] FULL ERROR: {type(e).__name__}: {e}')
+            import traceback; traceback.print_exc()
             return None
 
     # ── POSITION MONITORING ────────────────────────────────────────────────────

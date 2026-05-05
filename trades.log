@@ -84,3 +84,53 @@
 2026-04-29 19:42:49 | ATTEMPT | XRP/USDT | SHORT | conf:76 | R:R 1.08 below minimum 3.0
 2026-04-29 19:42:49 | SIGNAL | SHORT | SOL/USDT | conf:74% | Bearish FVG Confluence Short + RSI Divergence
 2026-04-29 19:42:49 | ATTEMPT | SOL/USDT | SHORT | conf:74 | R:R 1.39 below minimum 3.0
+2026-04-30 08:51:59 | SIGNAL | LONG | APT/USDT | conf:76% | BOS_BULLISH Confirmed + FVG Stack Reclaim
+2026-04-30 08:51:59 | ATTEMPT | APT/USDT | LONG | conf:76 | R:R 1.00 below minimum 3.0
+2026-04-30 08:51:59 | SIGNAL | SHORT | ENA/USDT | conf:74% | Bearish OB Stack + FVG Supply Retest
+2026-04-30 08:51:59 | ATTEMPT | ENA/USDT | SHORT | conf:74 | R:R 1.72 below minimum 3.0
+2026-04-30 08:57:39 | SIGNAL | LONG | DOGE/USDT | conf:74% | Trend Continuation | EMA Stack + Bullish OB Confluence
+2026-04-30 08:57:39 | ATTEMPT | DOGE/USDT | LONG | conf:74 | R:R 1.77 below minimum 3.0
+2026-04-30 09:16:08 | SIGNAL | LONG | APT/USDT | conf:78% | BOS Continuation + FVG Magnet Pull
+2026-04-30 09:16:08 | ATTEMPT | APT/USDT | LONG | conf:78 | R:R 1.00 below minimum 3.0
+2026-04-30 09:22:36 | SIGNAL | LONG | APT/USDT | conf:76% | BOS Bullish Retest + Multi-OB Confluence + Unfilled FVG Stack
+2026-04-30 09:22:36 | ATTEMPT | APT/USDT | LONG | conf:76 | R:R 1.00 below minimum 3.0
+2026-04-30 09:22:36 | SIGNAL | LONG | AI/USDT | conf:72% | Morning Star + Bullish FVG Magnet + EMA Stack Expansion
+2026-04-30 09:22:36 | ATTEMPT | AI/USDT | LONG | conf:72 | R:R 2.08 below minimum 3.0
+2026-04-30 09:35:02 | SIGNAL | LONG | AI/USDT | conf:78% | Bullish OB Reclaim + Morning Star + FVG Magnet
+2026-04-30 09:35:02 | ATTEMPT | AI/USDT | LONG | conf:78 | R:R 2.04 below minimum 3.0
+2026-04-30 09:41:40 | SIGNAL | LONG | AI/USDT | conf:74% | Bullish OB + Morning Star + FVG Magnet
+2026-04-30 09:41:40 | ATTEMPT | AI/USDT | LONG | conf:74 | R:R 2.08 below minimum 3.0
+2026-04-30 09:41:40 | SIGNAL | SHORT | ENA/USDT | conf:73% | Bearish TF Confluence + Multiple Unfilled Bear FVGs
+2026-04-30 09:41:40 | ATTEMPT | ENA/USDT | SHORT | conf:73 | R:R 1.26 below minimum 3.0
+2026-04-30 09:47:45 | SIGNAL | SHORT | SUI/USDT | conf:74% | Bearish Engulfing + Triple TF Bear + Bearish OB Rejection
+2026-04-30 09:47:45 | ATTEMPT | SUI/USDT | SHORT | conf:74 | R:R 2.06 below minimum 3.0
+2026-05-01 17:17:17 | ATTEMPT | ORCA/USDT | LONG | conf:74 | R:R 2.08 below minimum 3.0
+2026-05-01 17:18:40 | SIGNAL | LONG | ORCA/USDT | conf:74% | Bullish Trend Continuation + Negative Funding Squeeze
+2026-05-01 17:18:40 | ATTEMPT | ORCA/USDT | LONG | conf:74 | R:R 2.08 below minimum 3.0
+2026-05-01 17:25:10 | SIGNAL | LONG | ORCA/USDT | conf:78% | Bullish OB + Trending Bull + Negative Funding Squeeze
+2026-05-01 17:25:10 | ATTEMPT | ORCA/USDT | LONG | conf:78 | R:R 1.99 below minimum 3.0
+2026-05-01 17:25:10 | SIGNAL | LONG | SOL/USDT | conf:74% | Morning Star + BOS Bullish + Positive News Catalyst
+2026-05-01 17:25:10 | ATTEMPT | SOL/USDT | LONG | conf:74 | R:R 1.54 below minimum 3.0
+2026-05-01 17:35:52 | SIGNAL | LONG | ETH/USDT | conf:74% | BOS_CONFIRMED+Bull_OB+FVG_Confluence
+2026-05-01 17:35:52 | ATTEMPT | ETH/USDT | LONG | conf:74 | R:R 1.00 below minimum 3.0
+2026-05-01 17:35:52 | SIGNAL | LONG | SOL/USDT | conf:76% | BOS_CONFIRMED+Morning_Star+Stacked_FVGs
+2026-05-01 17:35:52 | ATTEMPT | SOL/USDT | LONG | conf:76 | R:R 1.00 below minimum 3.0
+2026-05-02 10:15:50 | SIGNAL | SHORT | ENA/USDT | conf:74% | BOS_BEARISH Continuation + Bearish FVG Magnet
+2026-05-02 10:15:50 | ATTEMPT | ENA/USDT | SHORT | conf:74 | R:R 1.00 below minimum 3.0
+2026-05-03 10:15:03 | SIGNAL | SHORT | CHIP/USDT | conf:74% | BOS Bearish Continuation + Unfilled FVG Resistance
+2026-05-03 10:15:03 | ATTEMPT | CHIP/USDT | SHORT | conf:74 | R:R 1.94 below minimum 3.0
+2026-05-03 10:20:27 | ATTEMPT | CHIP/USDT | SHORT | conf:74 | R:R 0.77 below minimum 3.0
+2026-05-03 10:21:13 | SIGNAL | SHORT | CHIP/USDT | conf:72% | BOS Bearish Continuation + Unfilled FVG Magnet
+2026-05-03 10:21:13 | ATTEMPT | CHIP/USDT | SHORT | conf:72 | R:R 1.78 below minimum 3.0
+2026-05-04 15:27:08 | SIGNAL | LONG | GIGGLE/USDT | conf:74% | BOS Bullish + FVG Support + EMA Stack
+2026-05-04 15:27:08 | ATTEMPT | GIGGLE/USDT | LONG | conf:74 | R:R 1.00 below minimum 3.0
+2026-05-04 15:27:08 | SIGNAL | LONG | ONDO/USDT | conf:72% | BOS Bullish + FVG Demand Stack + EMA Uptrend
+2026-05-04 15:27:08 | ATTEMPT | ONDO/USDT | LONG | conf:72 | R:R 2.07 below minimum 3.0
+2026-05-04 15:32:58 | SIGNAL | LONG | LINK/USDT | conf:76% | BOS Bullish Retest + OB Stack Confluence
+2026-05-04 15:32:58 | ATTEMPT | LINK/USDT | LONG | conf:76 | R:R 1.00 below minimum 3.0
+2026-05-04 18:31:47 | SIGNAL | LONG | PENDLE/USDT | conf:74% | BOS_BULLISH Retest + Bullish OB + FVG Stack
+2026-05-04 18:31:47 | ATTEMPT | PENDLE/USDT | LONG | conf:74 | R:R 2.07 below minimum 3.0
+2026-05-05 14:38:56 | SIGNAL | LONG | ADA/USDT | conf:74% | Bullish TF Confluence + OB Demand Zone
+2026-05-05 14:38:56 | ATTEMPT | ADA/USDT | LONG | conf:74 | R:R 1.00 below minimum 3.0
+2026-05-05 14:38:56 | SIGNAL | LONG | BTC/USDT | conf:72% | Bullish TF Confluence + Unfilled FVG Stack Support
+2026-05-05 14:38:56 | ATTEMPT | BTC/USDT | LONG | conf:72 | R:R 1.00 below minimum 3.0

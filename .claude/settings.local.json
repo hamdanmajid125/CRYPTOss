@@ -24,7 +24,17 @@
       "Bash(python -c \"import pandas_ta; print\\('pandas_ta OK:', pandas_ta.__version__\\)\")",
       "Bash(python -c \"import pandas_ta_classic; print\\('pandas_ta_classic OK'\\)\")",
       "Bash(python -c \"from scipy.signal import find_peaks; print\\('scipy OK'\\)\")",
-      "Bash(python -m py_compile utils.py data_feed.py claude_agent.py risk_manager.py weex_client.py trade_manager.py telegram_notifier.py main.py)"
+      "Bash(python -m py_compile utils.py data_feed.py claude_agent.py risk_manager.py weex_client.py trade_manager.py telegram_notifier.py main.py)",
+      "Bash(python -c \"from data_feed import DataFeed; from claude_agent import ClaudeAgent; print\\('OK'\\)\")",
+      "Bash(python -c \"import main\")",
+      "Bash(python -m uvicorn main:app --host 127.0.0.1 --port 8000)",
+      "Bash(curl -s http://127.0.0.1:8000/weex/test)",
+      "Bash(python -c \"import ccxt; ex = ccxt.weex\\(\\); print\\('URLs:', ex.urls\\); print\\('API:', ex.api\\)\")",
+      "Bash(taskkill /F /IM python.exe /T)",
+      "PowerShell(Stop-Process -Name python -Force -ErrorAction SilentlyContinue)",
+      "PowerShell(Invoke-RestMethod http://127.0.0.1:8000/weex/test)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }; Stop-Process -Name python -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2; Write-Output \"Cleared\")",
+      "PowerShell(Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }; Stop-Process -Name python -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2; Set-Location \"c:\\\\Users\\\\Hamdan\\\\Desktop\\\\New folder \\(4\\)\\\\files\\\\CRYPTO\"; Start-Process python -ArgumentList \"-m uvicorn main:app --host 127.0.0.1 --port 8000\" -RedirectStandardOutput server.log -RedirectStandardError server_err.log -WindowStyle Hidden; Start-Sleep -Seconds 6; Invoke-RestMethod http://127.0.0.1:8000/health | ConvertTo-Json)"
     ]
   }
 }
