@@ -270,6 +270,17 @@ class RiskManager:
             self.pause_until = max(self.pause_until, time.time() + 3600)  # 1 hour
             print(f'[Risk] Single loss >{loss_pct:.1f}% of account — pausing 1 hour')
 
+    # ── LIVE BALANCE SYNC ──────────────────────────────────────────────────────
+
+    def update_account_balance(self, live_balance: float):
+        """Sync risk math with live wallet balance from exchange."""
+        if live_balance <= 0:
+            return
+        self.settings.account_usdt = live_balance
+        self.current_balance = live_balance
+        if live_balance > self.peak_balance:
+            self.peak_balance = live_balance
+
     # ── STATS ──────────────────────────────────────────────────────────────────
 
     def get_stats(self) -> Dict:

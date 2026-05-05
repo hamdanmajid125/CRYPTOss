@@ -13,22 +13,7 @@ load_dotenv()
 
 @asynccontextmanager
 async def lifespan(__: FastAPI):
-    # Seed RiskManager with live WEEX balance before any task starts
-    try:
-        bal       = weex.get_balance()
-        usdt      = bal.get('USDT') or {}
-        live_bal  = usdt.get('free', 0) or usdt.get('total', 0)
-        if live_bal > 0:
-            risk.settings.account_usdt = live_bal
-            risk.current_balance       = live_bal
-            if risk.peak_balance < live_bal:
-                risk.peak_balance = live_bal
-            print(f'[Startup] WEEX live balance: ${live_bal:.2f} USDT')
-        else:
-            print('[Startup] WEEX balance returned 0 — risk sizing may be off')
-    except Exception as e:
-        print(f'[Startup] Balance fetch failed: {e}')
-
+    await sync_balance_to_risk()   # seed risk manager with live wallet before anything else
     asyncio.create_task(bg_auto_scanner())
     asyncio.create_task(bg_position_monitor())
     asyncio.create_task(bg_balance_broadcast())
@@ -84,10 +69,11 @@ risk   = RiskManager(RiskSettings(
     max_concurrent  = int(os.getenv('MAX_CONCURRENT_TRADES', '2')),
 ))
 weex = WeexClient(
-    api_key    = os.getenv('WEEX_API_KEY', ''),
-    secret     = os.getenv('WEEX_SECRET', ''),
-    passphrase = os.getenv('WEEX_PASSPHRASE', ''),
-    paper      = PAPER,
+    api_key       = os.getenv('WEEX_API_KEY', ''),
+    secret        = os.getenv('WEEX_SECRET', ''),
+    passphrase    = os.getenv('WEEX_PASSPHRASE', ''),
+    paper         = PAPER,
+    paper_balance = float(os.getenv('ACCOUNT_USDT', '10000')),
 )
 news_watcher   = NewsWatcher(blackout_minutes=int(os.getenv('NEWS_BLACKOUT_MIN', '30')))
 journal        = TradeJournal()
@@ -112,6 +98,20 @@ def log_trade(line: str):
     ts = time.strftime('%Y-%m-%d %H:%M:%S')
     with open('trades.log', 'a') as f:
         f.write(f'{ts} | {line}\n')
+
+
+async def sync_balance_to_risk():
+    """Fetch live USDT available from Weex and sync it to the risk manager."""
+    try:
+        usdt = weex.get_usdt_available()
+        if usdt > 0:
+            risk.update_account_balance(usdt)
+            log_trade(f'[Risk] Balance synced: ${usdt:.2f}')
+        else:
+            log_trade('[Risk] Balance sync returned $0.00 — check exchange connection')
+    except Exception as e:
+        log_trade(f'[Risk] Balance sync error: {e}')
+
 
 # ── BACKGROUND TASKS ──────────────────────────────────────────────────────────
 
@@ -272,18 +272,12 @@ async def bg_position_monitor():
 
 
 async def bg_balance_broadcast():
-    """Every 30s: fetch live WEEX balance, sync to RiskManager, broadcast."""
+    """Every 30s: sync live Weex balance to risk manager, then broadcast."""
     while True:
         await asyncio.sleep(30)
         try:
-            bal  = weex.get_balance()
-            usdt = bal.get('USDT') or {}
-            free = usdt.get('free', 0)
-            if free > 0:
-                risk.settings.account_usdt = free
-                risk.current_balance       = free
-                if risk.peak_balance < free:
-                    risk.peak_balance = free
+            await sync_balance_to_risk()
+            bal   = weex.get_balance()
             stats = risk.get_stats()
             await broadcast({'type': 'balance', 'balance': bal, 'stats': stats})
         except Exception as e:
@@ -303,6 +297,7 @@ async def bg_fng_update():
 
 # ── TRADE EXECUTION ────────────────────────────────────────────────────────────
 async def maybe_execute(signal: Dict):
+    await sync_balance_to_risk()   # always size from live wallet, never a stale env var
     # News blackout check — skip trades ±30 min around high-impact events
     blacked_out, blackout_reason = news_watcher.is_blackout()
     if blacked_out:

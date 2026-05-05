@@ -2,6 +2,7 @@ import base64
 import ccxt
 import hashlib
 import hmac
+import os
 import requests
 import time
 import uuid
@@ -13,7 +14,8 @@ from utils import with_retry
 class WeexClient:
     BASE_URL = 'https://api-contract.weex.com'
 
-    def __init__(self, api_key: str, secret: str, passphrase: str, paper: bool = True):
+    def __init__(self, api_key: str, secret: str, passphrase: str,
+                 paper: bool = True, paper_balance: float = 10000.0):
         self.paper      = paper
         self.api_key    = api_key.strip()
         self.secret     = secret.strip()
@@ -28,11 +30,11 @@ class WeexClient:
         # Public Binance for price feeds (works in both paper and live mode)
         self._public = ccxt.binance({'enableRateLimit': True, 'options': {'defaultType': 'spot'}})
 
-        # Paper trading state
-        self._paper_balance    = 10000.0
+        # Paper trading state — seeded from caller (usually ACCOUNT_USDT env var)
+        self._paper_balance    = paper_balance
         self._paper_positions: List[Dict] = []
 
-        print(f'[WEEX] Initialized — paper={paper}')
+        print(f'[WEEX] Initialized — paper={paper}, paper_balance={paper_balance:.2f}')
 
     # ── RAW HTTP LAYER (HMAC-SHA256) ───────────────────────────────────────────
 
@@ -130,6 +132,34 @@ class WeexClient:
             print(f'[Weex] FULL ERROR: {type(e).__name__}: {e}')
             import traceback; traceback.print_exc()
             return {'error': str(e), 'USDT': {'free': 0, 'used': 0, 'total': 0}}
+
+    def get_usdt_available(self) -> float:
+        """Return available USDT as a single float for risk sizing (paper and live)."""
+        if self.paper:
+            # Try the real exchange balance so paper sizing reflects the actual wallet.
+            try:
+                raw  = self.exchange.fetch_balance()
+                usdt = raw.get('USDT', {})
+                free = float(usdt.get('free', 0) or 0)
+                if free > 0:
+                    self._paper_balance = free  # keep paper balance in sync with real wallet
+                    return free
+            except Exception:
+                pass
+            # Fall back to simulated paper balance minus open-position margin
+            used = sum(p.get('margin', 0) for p in self._paper_positions)
+            return max(0.0, round(self._paper_balance - used, 2))
+        # Live mode
+        try:
+            bal  = self.get_balance()
+            usdt = bal.get('USDT', {})
+            free = float(usdt.get('free', 0) or 0)
+            if free > 0:
+                return free
+            return float(usdt.get('total', 0) or 0)
+        except Exception as e:
+            print(f'[Weex] get_usdt_available failed: {e}')
+            return 0.0
 
     # ── POSITIONS ──────────────────────────────────────────────────────────────
 
