@@ -279,20 +279,25 @@ BEST SMC SETUPS (in order of confidence):
 3. Price fills FVG + candle pattern → HIGH confidence
 4. OB + FVG overlap = "Golden Zone" → VERY HIGH confidence
 
-━━━ STEP 7: ATR-BASED SL/TP CALCULATION ━━━
-ATR(14): {atr}
+━━━ STEP 7: SL/TP RULES (MANDATORY — violating these = output WAIT) ━━━
+ATR(14): {atr} | 0.8×ATR={round(atr*0.8,6)} | 2.5×ATR={round(atr*2.5,6)} | 3.0×ATR={round(atr*3.0,6)}
 
-STOP LOSS RULES:
-→ Place SL BEYOND the nearest Order Block or key swing level
-→ Never place SL at exactly round numbers (market will hunt them)
-→ Minimum SL distance: {round(atr * 1.2, 6)} | Maximum: {round(atr * 2.5, 6)}
-→ SL too tight = gets stopped out by noise → lose money
-→ SL too wide = bad risk/reward → also lose money
+SL PLACEMENT:
+→ LONG:  SL just below the most recent swing low or bullish OB + 0.3×ATR buffer ({round(atr*0.3,6)})
+         Max SL distance from entry = 3.0×ATR = {round(atr*3.0,6)} — output WAIT if SL must be wider
+→ SHORT: SL just above the most recent swing high or bearish OB + 0.3×ATR buffer ({round(atr*0.3,6)})
+         Max SL distance from entry = 3.0×ATR = {round(atr*3.0,6)} — output WAIT if SL must be wider
 
-TAKE PROFIT RULES (minimum 1:2 Risk/Reward — NEVER trade 1:1):
-→ TP1 : {round(atr * 2.2, 6)} from entry (take 40% of position here, move SL to breakeven)
-→ TP2 : {round(atr * 4.0, 6)} from entry (take 40% here)
-→ TP3 : {round(atr * 7.0, 6)} from entry (let 20% run — the "runner")
+TP1 PLACEMENT — THE SINGLE MOST IMPORTANT RULE:
+→ LONG:  TP1 MUST equal the nearest BSL (buy-side liquidity) between {round(atr*0.8,6)} and {round(atr*2.5,6)} above entry
+         Available BSL levels (stops clustered above recent highs): {', '.join(str(round(p, 6)) for p in liq['bsl'])}
+→ SHORT: TP1 MUST equal the nearest SSL (sell-side liquidity) between {round(atr*0.8,6)} and {round(atr*2.5,6)} below entry
+         Available SSL levels (stops clustered below recent lows): {', '.join(str(round(p, 6)) for p in liq['ssl'])}
+→ If NO qualifying BSL/SSL exists in that ATR range → output WAIT. Do NOT invent a TP.
+→ NEVER use ATR math to set TP1. Only use the real liquidity levels listed above.
+
+TP2: next liquidity pool beyond TP1, or the nearest 4h structural high/low
+TP3 (runner): only if 4h trend agrees — target {round(atr*3.5,6)} to {round(atr*5.0,6)} from entry
 
 ━━━ STEP 8: MARKET SENTIMENT ━━━
 Fear & Greed Index: {fng_val}/100 — {fng['label']}
@@ -348,7 +353,7 @@ Remember: The best traders miss many trades. They only take the perfect setup.
 Every WAIT decision you make is protecting capital.
 
 Respond ONLY with this exact JSON (no markdown, no preamble, no explanation):
-{{"action":"LONG or SHORT or WAIT","confidence":0-100,"entry":{price},"sl":0.0,"tp1":0.0,"tp2":0.0,"tp3":0.0,"rr":"1:X.X","setup_type":"exact SMC setup name e.g. Bullish OB+FVG+Engulfing / Liquidity Sweep+BOS+Retest / WAIT-mixed-TF","session":"{self._trading_session()}","candle_pattern":"{candle_pattern}","timeframe_bias":"{tf_bias['overall']}","sentiment":"{fng['label']}","volume_signal":"{volume_signal}","reason":"3 sentences: (1) SMC structure and why this entry (2) Volume + candlestick + RSI confluence (3) Key risk factor and what would invalidate this trade","key_level":"most critical price level to watch","invalidation":"exact price that completely invalidates this setup — where you would cut the loss"}}'''
+{{"action":"LONG or SHORT or WAIT","confidence":0-100,"entry":{price},"sl":0.0,"tp1":0.0,"tp2":0.0,"tp3":0.0,"tp1_anchor":"BSL@<exact_price> or SSL@<exact_price> — MANDATORY for LONG/SHORT, empty string for WAIT","rr":"1:X.X","setup_type":"exact SMC setup name e.g. Bullish OB+FVG+Engulfing / Liquidity Sweep+BOS+Retest / WAIT-mixed-TF","session":"{self._trading_session()}","candle_pattern":"{candle_pattern}","timeframe_bias":"{tf_bias['overall']}","sentiment":"{fng['label']}","volume_signal":"{volume_signal}","reason":"3 sentences: (1) SMC structure and why this entry (2) Volume + candlestick + RSI confluence (3) Key risk factor and what would invalidate this trade","key_level":"most critical price level to watch","invalidation":"exact price that completely invalidates this setup — where you would cut the loss"}}'''
 
     # ─────────────────────────────────────────────────────────────────────────
     # BATCH SIGNAL  (one Claude call for N coins — replaces N individual calls)
@@ -398,8 +403,8 @@ Respond ONLY with this exact JSON (no markdown, no preamble, no explanation):
             f"News={data.get('news_sentiment','N/A')[:50]}"
             f" | F&G={fng.get('value', 50)}/{fng.get('label', '')}\n"
             f"Funding={funding.get('label', 'Neutral')[:40]}\n"
-            f"SL_range=[{round(price - atr*1.2, 4)}, {round(price - atr*2.5, 4)}]"
-            f" TP1_target={round(price + atr*2.5, 4)}"
+            f"SL_max_dist={round(atr*3.0,4)} from entry (0.3xATR buf={round(atr*0.3,4)})\n"
+            f"TP1_range={round(atr*0.8,4)}-{round(atr*2.5,4)} | tp1_anchor REQUIRED (BSL for LONG, SSL for SHORT)"
         )
 
     def get_batch_signals(self, data_list: list) -> list:
@@ -423,8 +428,8 @@ LONG: TF_overall=BULLISH ≥2/3 | RSI<70 | volume≠VERY LOW | OB/FVG/CHoCH pres
 SHORT: TF_overall=BEARISH ≥2/3 | RSI>30 | volume≠VERY LOW | OB/FVG/CHoCH present | confidence≥72
 WAIT: TF=MIXED | VERY LOW volume | RSI>78+LONG | RSI<22+SHORT | no confluence | confidence<72
 Priority: CHoCH > BOS > OB+FVG > OB alone | High respect_count = stronger zone
-Unfilled FVG = price magnet. Min R:R 1:2.5. SL beyond OB/swing (ATR×1.2-2.5).
-TP1=ATR×2.5 TP2=ATR×4.5 TP3=ATR×7.0 | Session: {session}
+Unfilled FVG = price magnet. Min R:R 1:2.5. SL beyond OB/swing (max 3.0×ATR).
+TP1=nearest BSL (LONG)/SSL (SHORT) in 0.8-2.5×ATR — tp1_anchor field MANDATORY | TP2=next pool | TP3=3.5-5×ATR | Session: {session}
 
 ━━ {n} SETUPS ━━
 
@@ -433,7 +438,7 @@ TP1=ATR×2.5 TP2=ATR×4.5 TP3=ATR×7.0 | Session: {session}
 ━━ OUTPUT ━━
 Return exactly {n} objects (one per coin), sorted by confidence desc. WAIT all weak setups.
 ONLY JSON array, no markdown, no extra text:
-[{{"symbol":"X/USDT","action":"LONG|SHORT|WAIT","confidence":0-100,"entry":0.0,"sl":0.0,"tp1":0.0,"tp2":0.0,"tp3":0.0,"rr":"1:X.X","setup_type":"setup name or WAIT-reason","reason":"why entry + key risk (2 sentences)","key_level":"critical level","invalidation":"exact invalidation price"}}]'''
+[{{"symbol":"X/USDT","action":"LONG|SHORT|WAIT","confidence":0-100,"entry":0.0,"sl":0.0,"tp1":0.0,"tp2":0.0,"tp3":0.0,"tp1_anchor":"BSL@<price> or SSL@<price> — MANDATORY for LONG/SHORT","rr":"1:X.X","setup_type":"setup name or WAIT-reason","reason":"why entry + key risk (2 sentences)","key_level":"critical level","invalidation":"exact invalidation price"}}]'''
 
         try:
             resp = self.client.messages.create(
@@ -467,11 +472,36 @@ ONLY JSON array, no markdown, no extra text:
                     'sentiment':      orig.get('fear_greed', {}).get('label', 'Neutral'),
                     'session':        session,
                 })
-                # Enforce confidence gate
+                # Confidence gate
                 if sig.get('action') in ('LONG', 'SHORT') and sig.get('confidence', 0) < 72:
                     sig['action'] = 'WAIT'
                     sig['reason'] = (f"Confidence {sig['confidence']}% below 72. "
                                      + sig.get('reason', ''))
+
+                sig['atr'] = orig.get('atr', 0)
+
+                # tp1_anchor gate — TP1 must reference a real BSL/SSL level
+                if sig.get('action') in ('LONG', 'SHORT'):
+                    action_b   = sig['action']
+                    tp1_anchor = sig.get('tp1_anchor', '').strip()
+                    if not tp1_anchor:
+                        sig['action'] = 'WAIT'
+                        sig['reason'] = ('TP1_REJECT: tp1_anchor missing. '
+                                         + sig.get('reason', ''))
+                    else:
+                        tp1_b  = sig.get('tp1', 0)
+                        liq_b  = orig.get('liquidity', {'bsl': [], 'ssl': []})
+                        target = liq_b.get('bsl', []) if action_b == 'LONG' else liq_b.get('ssl', [])
+                        if tp1_b and target:
+                            tol = tp1_b * 0.001
+                            if not any(abs(tp1_b - lvl) <= tol for lvl in target):
+                                lev_str = [round(l, 4) for l in target]
+                                sig['action'] = 'WAIT'
+                                sig['reason'] = (
+                                    f'TP1_REJECT: TP1={tp1_b} not within 0.1% of '
+                                    f'{"BSL" if action_b == "LONG" else "SSL"} {lev_str}. '
+                                    + sig.get('reason', ''))
+
                 result.append(sig)
 
             print(f'[Claude] Batch: {n} coins → 1 call → '
@@ -508,12 +538,35 @@ ONLY JSON array, no markdown, no extra text:
             signal['price']     = market_data['price']
             signal['timestamp'] = market_data.get('timestamp', '')
             signal['pre_score'] = pre_score
+            signal['atr']       = market_data.get('atr', 0)
 
-            # ✅ Confidence gate raised to 72 (was 65 — too low!)
+            # Confidence gate
             if signal.get('action') in ('LONG', 'SHORT') and signal.get('confidence', 0) < 72:
                 signal['action'] = 'WAIT'
                 signal['reason'] = (f"Confidence {signal['confidence']}% below minimum 72. "
                                     + signal.get('reason', ''))
+
+            # tp1_anchor gate — TP1 must reference a real BSL/SSL level
+            if signal.get('action') in ('LONG', 'SHORT'):
+                action     = signal['action']
+                tp1_anchor = signal.get('tp1_anchor', '').strip()
+                if not tp1_anchor:
+                    signal['action'] = 'WAIT'
+                    signal['reason'] = ('TP1_REJECT: tp1_anchor missing — TP1 not anchored to a '
+                                        'real BSL/SSL level. ' + signal.get('reason', ''))
+                else:
+                    tp1 = signal.get('tp1', 0)
+                    liq = market_data.get('liquidity', {'bsl': [], 'ssl': []})
+                    target = liq.get('bsl', []) if action == 'LONG' else liq.get('ssl', [])
+                    if tp1 and target:
+                        tol = tp1 * 0.001  # ±0.1%
+                        if not any(abs(tp1 - lvl) <= tol for lvl in target):
+                            lev_str = [round(l, 4) for l in target]
+                            signal['action'] = 'WAIT'
+                            signal['reason'] = (
+                                f'TP1_REJECT: TP1={tp1} not within 0.1% of any '
+                                f'{"BSL" if action == "LONG" else "SSL"} level {lev_str}. '
+                                + signal.get('reason', ''))
 
             return signal
 

@@ -154,6 +154,22 @@ class RiskManager:
             if rr < self.settings.min_rr:
                 return False, f'R:R {rr:.2f} below minimum {self.settings.min_rr}'
 
+        # TP1 ATR-proximity gate (requires atr field added by get_signal/get_batch_signals)
+        atr_v    = float(signal.get('atr', 0) or 0)
+        tp1_v    = float(signal.get('tp1', 0) or 0)
+        entry_v  = float(signal.get('entry', 0) or 0)
+        action_v = signal.get('action', '')
+        if atr_v > 0 and tp1_v > 0 and entry_v > 0 and action_v in ('LONG', 'SHORT'):
+            tp1_dist = (tp1_v - entry_v) if action_v == 'LONG' else (entry_v - tp1_v)
+            if tp1_dist > 0:
+                tp1_atr = tp1_dist / atr_v
+                if tp1_atr < 0.5:
+                    return False, (f'TP1 too close: {tp1_atr:.2f}x ATR (min 0.5x) — '
+                                   f'fees eat profit at this distance')
+                if tp1_atr > 3.0:
+                    return False, (f'TP1 too far: {tp1_atr:.2f}x ATR (max 3.0x) — '
+                                   f'low probability of hitting before reversal')
+
         # Correlation filter
         sym = signal.get('symbol', '')
         action = signal.get('action', '')

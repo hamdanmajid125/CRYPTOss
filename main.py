@@ -219,6 +219,9 @@ async def bg_auto_scanner():
                         if AUTO_TRADE:
                             await maybe_execute(signal)
                     else:
+                        wait_reason = signal.get('reason', '')
+                        if wait_reason.startswith('TP1_REJECT'):
+                            log_trade(f"TP1_REJECT | {sym} | conf:{conf}% | {wait_reason[:150]}")
                         print(f'[AutoScanner] {sym} — WAIT (conf:{conf}%)')
 
             else:
@@ -442,13 +445,19 @@ async def scan_now(background_tasks: BackgroundTasks):
                              'candidates': [d['symbol'] for d in batch]})
             signals = claude.get_batch_signals(batch)
             for signal in signals:
-                sym = signal.get('symbol', '')
+                sym    = signal.get('symbol', '')
+                action = signal.get('action', 'WAIT')
+                conf   = signal.get('confidence', 0)
                 await broadcast({'type': 'signal', 'symbol': sym, 'signal': signal})
-                if signal.get('action') in ('LONG', 'SHORT'):
+                if action in ('LONG', 'SHORT'):
                     signals_found.append(signal)
                     notifier.send_signal(signal)
                     if AUTO_TRADE:
                         await maybe_execute(signal)
+                else:
+                    wait_reason = signal.get('reason', '')
+                    if wait_reason.startswith('TP1_REJECT'):
+                        log_trade(f"TP1_REJECT | {sym} | conf:{conf}% | {wait_reason[:150]}")
 
         await broadcast({'type': 'scan_complete', 'total_scanned': len(top_coins),
                          'candidates': len(batch), 'signals_found': len(signals_found),
@@ -467,7 +476,14 @@ async def analyze_manual(symbol: str, background_tasks: BackgroundTasks):
         signal    = claude.get_signal(data)
         if signal:
             background_tasks.add_task(broadcast, {'type': 'signal', 'symbol': ex_symbol, 'signal': signal})
-            if AUTO_TRADE:
+            action      = signal.get('action', 'WAIT')
+            conf        = signal.get('confidence', 0)
+            wait_reason = signal.get('reason', '')
+            if action in ('LONG', 'SHORT'):
+                log_trade(f"SIGNAL | {action} | {ex_symbol} | conf:{conf}% | {signal.get('setup_type','')}")
+            elif wait_reason.startswith('TP1_REJECT'):
+                log_trade(f"TP1_REJECT | {ex_symbol} | conf:{conf}% | {wait_reason[:150]}")
+            if AUTO_TRADE and action in ('LONG', 'SHORT'):
                 background_tasks.add_task(maybe_execute, signal)
         return signal or {'action': 'WAIT', 'reason': 'Analysis returned no signal'}
     except Exception as e:
