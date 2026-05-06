@@ -416,6 +416,21 @@ Respond ONLY with this exact JSON (no markdown, no preamble, no explanation):
         if not data_list:
             return []
 
+        # Regime filter: remove low-volatility coins before LLM call
+        filtered, skipped = [], []
+        for d in data_list:
+            adx = d.get('adx', 0)
+            bbp = d.get('bb_width_percentile', 50)
+            if adx < 18 or bbp < 25:
+                skipped.append({'action': 'WAIT', 'symbol': d.get('symbol', ''),
+                                'confidence': 0, 'regime_skip': True,
+                                'reason': f'REGIME_SKIP: ADX={adx:.1f} BB%={bbp}'})
+            else:
+                filtered.append(d)
+        if not filtered:
+            return skipped
+
+        data_list = filtered
         n        = len(data_list)
         session  = self._trading_session()
         summaries = '\n\n'.join(self.build_compact_summary(d) for d in data_list)
@@ -505,18 +520,35 @@ ONLY JSON array, no markdown, no extra text:
                 result.append(sig)
 
             print(f'[Claude] Batch: {n} coins → 1 call → '
-                  f"{sum(1 for s in result if s.get('action') in ('LONG','SHORT'))} signal(s)")
-            return result
+                  f"{sum(1 for s in result if s.get('action') in ('LONG','SHORT'))} signal(s)"
+                  f" | {len(skipped)} regime-skipped")
+            return skipped + result
 
         except Exception as e:
             print(f'[Claude] Batch error: {e}')
-            return []
+            return skipped
 
     # ─────────────────────────────────────────────────────────────────────────
     # GET SIGNAL  (kept for manual analyze / webhook — single-coin deep analysis)
     # ─────────────────────────────────────────────────────────────────────────
     def get_signal(self, market_data: dict, deep: bool = False) -> Optional[Dict]:
         try:
+            # ── Phase 4: Regime filter — skip LLM entirely in choppy/low-vol markets
+            adx = market_data.get('adx', 0)
+            bbp = market_data.get('bb_width_percentile', 50)
+            atp = market_data.get('atr_percentile', 50)
+            sym = market_data.get('symbol', '')
+            min_conf = 72
+
+            if adx < 18 or bbp < 25:
+                reason = f'Low-volatility regime (ADX={adx:.1f}, BB%ile={bbp:.0f}). Skipping LLM call.'
+                print(f'[REGIME_SKIP] {sym} — {reason}')
+                return {'action': 'WAIT', 'reason': reason, 'symbol': sym,
+                        'confidence': 0, 'regime_skip': True}
+
+            if atp > 95:
+                min_conf = min_conf + 10   # extreme vol needs higher conviction
+
             tf_bias   = market_data.get('timeframe_bias', {'overall': 'MIXED', 'agreement': 0})
             fng       = market_data.get('fear_greed', {'value': 50, 'label': 'Neutral'})
             pre_score = self._score_confidence(market_data, tf_bias, fng)
@@ -540,10 +572,10 @@ ONLY JSON array, no markdown, no extra text:
             signal['pre_score'] = pre_score
             signal['atr']       = market_data.get('atr', 0)
 
-            # Confidence gate
-            if signal.get('action') in ('LONG', 'SHORT') and signal.get('confidence', 0) < 72:
+            # Confidence gate (min_conf raised to 82 during extreme ATR)
+            if signal.get('action') in ('LONG', 'SHORT') and signal.get('confidence', 0) < min_conf:
                 signal['action'] = 'WAIT'
-                signal['reason'] = (f"Confidence {signal['confidence']}% below minimum 72. "
+                signal['reason'] = (f"Confidence {signal['confidence']}% below minimum {min_conf}. "
                                     + signal.get('reason', ''))
 
             # tp1_anchor gate — TP1 must reference a real BSL/SSL level

@@ -103,6 +103,17 @@ class DataFeed:
         df['bb_lower'] = bb[bb_lower_col]
 
         df['volume_sma'] = ta.sma(df['volume'], length=20)
+
+        adx_df = ta.adx(df['high'], df['low'], df['close'], length=14)
+        if adx_df is not None:
+            adx_col = [c for c in adx_df.columns if c.startswith('ADX')][0]
+            df['adx'] = adx_df[adx_col]
+        else:
+            df['adx'] = float('nan')
+
+        bb_mid_col = [c for c in bb.columns if c.startswith('BBM')][0]
+        df['bb_mid'] = bb[bb_mid_col]
+
         return df
 
     # ─────────────────────────────────────────────────────────────────────
@@ -675,6 +686,16 @@ class DataFeed:
         prev24  = df.iloc[-24] if len(df) >= 24 else df.iloc[0]
         change24h = (last['close'] - prev24['close']) / prev24['close'] * 100
 
+        # Regime metrics
+        window = df.tail(100)
+        cur_bb_width  = float(last['bb_upper'] - last['bb_lower']) if not pd.isna(last.get('bb_upper', float('nan'))) else 0
+        cur_atr       = float(last['atr']) if not pd.isna(last['atr']) else 0
+        bb_widths     = (window['bb_upper'] - window['bb_lower']).dropna()
+        atr_vals      = window['atr'].dropna()
+        bb_width_pct  = int(round((bb_widths < cur_bb_width).sum() / len(bb_widths) * 100)) if len(bb_widths) > 1 else 50
+        atr_pct       = int(round((atr_vals   < cur_atr).sum()       / len(atr_vals)   * 100)) if len(atr_vals)   > 1 else 50
+        cur_adx       = float(last['adx']) if 'adx' in last.index and not pd.isna(last['adx']) else 0.0
+
         fng            = self.get_fear_and_greed()
         tf_bias        = self.get_timeframe_bias(symbol)
         volume_signal  = self.get_volume_signal(df)
@@ -717,5 +738,8 @@ class DataFeed:
             'bos_choch':      bos_choch,
             'regime':         regime,
             'funding_rate':   funding_rate,
-            'candles':        df.tail(80)[['open', 'high', 'low', 'close', 'volume']].to_dict('records'),
+            'candles':             df.tail(80)[['open', 'high', 'low', 'close', 'volume']].to_dict('records'),
+            'adx':                 round(cur_adx, 2),
+            'bb_width_percentile': bb_width_pct,
+            'atr_percentile':      atr_pct,
         }
