@@ -436,6 +436,69 @@ class WeexClient:
             print(f'[WEEX] Close failed: {e}')
             return {'error': str(e)}
 
+    def close_partial(self, order_id: str, fraction: float,
+                      symbol: str = '', side: str = '',
+                      exit_price: float = 0.0) -> Dict:
+        """Close fraction of a position at market. Paper uses exit_price (or current_price) for PnL."""
+        if self.paper:
+            pos = next((p for p in self._paper_positions if p['id'] == order_id), None)
+            if not pos:
+                pos = next((p for p in self._paper_positions
+                            if p['symbol'] == symbol and p['side'] == side), None)
+            if not pos:
+                return {'error': 'position_not_found'}
+            fill = exit_price or pos.get('current_price', pos['entry'])
+            qty_close = round(pos['qty'] * fraction, 6)
+            is_long = pos['side'] == 'LONG'
+            pnl = round(((fill - pos['entry']) * qty_close if is_long
+                         else (pos['entry'] - fill) * qty_close), 2)
+            self._paper_balance += pnl
+            pos['qty'] = round(pos['qty'] - qty_close, 6)
+            pos['margin'] = round(pos['margin'] * (1 - fraction), 2)
+            print(f'[PAPER] Partial close {fraction*100:.0f}% {pos["side"]} {pos["symbol"]}'
+                  f' @ {fill} PnL={pnl:+.2f}')
+            return {'status': 'paper_partial', 'pnl': pnl, 'qty_closed': qty_close}
+        try:
+            close_side = 'sell' if side == 'LONG' else 'buy'
+            positions = self.exchange.fetch_positions([symbol]) if symbol else []
+            pos_qty = next((float(p['contracts']) for p in positions
+                            if p['symbol'] == symbol and
+                            p.get('side', '').upper() == side.upper()), 0)
+            qty_close = round(pos_qty * fraction, 6)
+            if qty_close <= 0:
+                return {'status': 'nothing_to_close'}
+            return self.exchange.create_order(symbol, 'market', close_side, qty_close,
+                                              params={'reduceOnly': True})
+        except Exception as e:
+            print(f'[WEEX] close_partial failed: {e}')
+            return {'error': str(e)}
+
+    def modify_sl(self, order_id: str, new_sl_price: float,
+                  symbol: str = '', side: str = '') -> Dict:
+        """Update stop-loss on an open position. Paper: update in-memory. Live: place new stop order."""
+        if self.paper:
+            pos = next((p for p in self._paper_positions if p['id'] == order_id), None)
+            if not pos:
+                pos = next((p for p in self._paper_positions
+                            if p['symbol'] == symbol and p['side'] == side), None)
+            if not pos:
+                return {'error': 'position_not_found'}
+            old_sl = pos['sl']
+            pos['sl'] = new_sl_price
+            print(f'[PAPER] SL updated {pos["symbol"]} {old_sl} -> {new_sl_price}')
+            return {'status': 'paper_sl_updated', 'old_sl': old_sl, 'new_sl': new_sl_price}
+        try:
+            stop_side = 'sell' if side == 'LONG' else 'buy'
+            result = self.exchange.create_order(
+                symbol, 'stop_market', stop_side, 0,
+                params={'stopPrice': new_sl_price, 'reduceOnly': True, 'closePosition': True},
+            )
+            print(f'[WEEX] SL updated {symbol} → {new_sl_price}')
+            return result
+        except Exception as e:
+            print(f'[WEEX] modify_sl failed: {e}')
+            return {'error': str(e)}
+
     def close_all(self) -> List[Dict]:
         results = []
         if self.paper:

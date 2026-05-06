@@ -34,7 +34,8 @@
       "PowerShell(Stop-Process -Name python -Force -ErrorAction SilentlyContinue)",
       "PowerShell(Invoke-RestMethod http://127.0.0.1:8000/weex/test)",
       "PowerShell(Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }; Stop-Process -Name python -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2; Write-Output \"Cleared\")",
-      "PowerShell(Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }; Stop-Process -Name python -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2; Set-Location \"c:\\\\Users\\\\Hamdan\\\\Desktop\\\\New folder \\(4\\)\\\\files\\\\CRYPTO\"; Start-Process python -ArgumentList \"-m uvicorn main:app --host 127.0.0.1 --port 8000\" -RedirectStandardOutput server.log -RedirectStandardError server_err.log -WindowStyle Hidden; Start-Sleep -Seconds 6; Invoke-RestMethod http://127.0.0.1:8000/health | ConvertTo-Json)"
+      "PowerShell(Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }; Stop-Process -Name python -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2; Set-Location \"c:\\\\Users\\\\Hamdan\\\\Desktop\\\\New folder \\(4\\)\\\\files\\\\CRYPTO\"; Start-Process python -ArgumentList \"-m uvicorn main:app --host 127.0.0.1 --port 8000\" -RedirectStandardOutput server.log -RedirectStandardError server_err.log -WindowStyle Hidden; Start-Sleep -Seconds 6; Invoke-RestMethod http://127.0.0.1:8000/health | ConvertTo-Json)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }

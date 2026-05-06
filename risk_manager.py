@@ -286,6 +286,16 @@ class RiskManager:
             self.pause_until = max(self.pause_until, time.time() + 3600)  # 1 hour
             print(f'[Risk] Single loss >{loss_pct:.1f}% of account — pausing 1 hour')
 
+    def record_partial_pnl(self, pnl_usdt: float):
+        """Update daily PnL and balance for a partial close without removing the trade."""
+        self.daily_pnl += pnl_usdt
+        self.current_balance += pnl_usdt
+        if pnl_usdt > 0:
+            self.best_trade = max(self.best_trade, pnl_usdt)
+            if self.current_balance > self.peak_balance:
+                self.peak_balance = self.current_balance
+        self._save_state()
+
     # ── LIVE BALANCE SYNC ──────────────────────────────────────────────────────
 
     def update_account_balance(self, live_balance: float):

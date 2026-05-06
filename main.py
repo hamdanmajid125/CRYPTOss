@@ -15,7 +15,6 @@ load_dotenv()
 async def lifespan(__: FastAPI):
     await sync_balance_to_risk()   # seed risk manager with live wallet before anything else
     asyncio.create_task(bg_auto_scanner())
-    asyncio.create_task(bg_position_monitor())
     asyncio.create_task(bg_balance_broadcast())
     asyncio.create_task(bg_fng_update())
     asyncio.create_task(bg_top_coins_refresh())
@@ -260,20 +259,6 @@ async def bg_top_coins_refresh():
             print(f'[TopCoins] Error: {e}')
 
 
-async def bg_position_monitor():
-    """Every 60s: check paper positions for TP/SL hits."""
-    while True:
-        await asyncio.sleep(60)
-        try:
-            events = weex.check_positions()
-            for ev in events:
-                await broadcast({'type': 'position_event', **ev})
-                log_trade(f"POS_EVENT | {ev.get('event')} | {ev.get('symbol')} | PnL: {ev.get('pnl', 0)}")
-                notifier.send_position_event(ev)
-        except Exception as e:
-            print(f'[Monitor] Error: {e}')
-
-
 async def bg_balance_broadcast():
     """Every 30s: sync live Weex balance to risk manager, then broadcast."""
     while True:
@@ -344,6 +329,7 @@ async def maybe_execute(signal: Dict):
             trade_manager.register({
                 'id': order_id, 'symbol': signal['symbol'], 'side': signal['action'],
                 'entry': entry, 'sl': sl, 'tp1': tp1, 'tp2': tp2, 'tp3': tp3, 'qty': qty,
+                'atr': signal.get('atr', 0), 'invalidation': signal.get('invalidation', 0),
             })
             await broadcast({'type': 'trade_opened', 'order': result, 'signal': signal})
             log_trade(f"OPENED | {signal['action']} {qty} {signal['symbol']} @ {entry} | SL:{sl} TP1:{tp1} | id:{order_id}")
@@ -587,6 +573,7 @@ async def manual_trade(body: Dict):
         trade_manager.register({
             'id': order_id, 'symbol': sym, 'side': action,
             'entry': entry, 'sl': sl, 'tp1': tp1, 'tp2': tp2, 'tp3': tp3, 'qty': qty,
+            'atr': signal.get('atr', 0), 'invalidation': signal.get('invalidation', 0),
         })
         await broadcast({'type': 'trade_opened', 'order': result, 'signal': signal})
         notifier.send_trade_opened(sym, action, qty, entry, sl, tp1)
