@@ -51,7 +51,8 @@
       "Bash(python -m pytest tests/ -v --tb=no -q)",
       "Bash(python -m pytest tests/test_phase4.py -v)",
       "Bash(python -m pytest tests/ -v --tb=short)",
-      "Bash(pip show *)"
+      "Bash(pip show *)",
+      "Bash(dir *.py /b)"
     ]
   }
 }

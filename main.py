@@ -83,10 +83,7 @@ public_exchange = ccxt.binance({'options': {'defaultType': 'spot'}, 'enableRateL
 
 feed   = DataFeed(public_exchange, cryptopanic_token=os.getenv('CRYPTOPANIC_TOKEN', ''))
 claude = ClaudeAgent(api_key=os.getenv('ANTHROPIC_API_KEY', ''))
-notifier = WhatsAppNotifier(
-    phone   = os.getenv('WHATSAPP_PHONE', ''),
-    api_key = os.getenv('WHATSAPP_API_KEY', ''),
-)
+notifier = WhatsAppNotifier()
 def _on_risk_alert(event: str, data: dict) -> None:
     reason = data.get('reason', event)
     if event == 'bot_paused':
