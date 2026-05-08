@@ -5,6 +5,10 @@ import time
 import xml.etree.ElementTree as ET
 from utils import with_retry
 from indicators import compute_indicators
+from smc import (find_fvgs as _smc_find_fvgs,
+                 find_order_blocks as _smc_find_obs,
+                 detect_rsi_divergence as _smc_detect_div,
+                 find_liquidity_levels as _smc_find_liq)
 
 class DataFeed:
 
@@ -198,120 +202,19 @@ class DataFeed:
     # RSI DIVERGENCE
     # ─────────────────────────────────────────────────────────────────────
     def detect_rsi_divergence(self, df: pd.DataFrame) -> str:
-        if len(df) < 25:
-            return 'NONE'
-        recent_window = df.tail(5)
-        prev_window = df.iloc[-20:-5]
-        if recent_window.empty or prev_window.empty:
-            return 'NONE'
-        try:
-            recent_high_idx = recent_window['close'].idxmax()
-            prev_high_idx = prev_window['close'].idxmax()
-            recent_low_idx = recent_window['close'].idxmin()
-            prev_low_idx = prev_window['close'].idxmin()
-
-            recent_high_price = recent_window.loc[recent_high_idx, 'close']
-            prev_high_price = prev_window.loc[prev_high_idx, 'close']
-            recent_high_rsi = recent_window.loc[recent_high_idx, 'rsi']
-            prev_high_rsi = prev_window.loc[prev_high_idx, 'rsi']
-
-            recent_low_price = recent_window.loc[recent_low_idx, 'close']
-            prev_low_price = prev_window.loc[prev_low_idx, 'close']
-            recent_low_rsi = recent_window.loc[recent_low_idx, 'rsi']
-            prev_low_rsi = prev_window.loc[prev_low_idx, 'rsi']
-
-            if recent_high_price > prev_high_price and recent_high_rsi < prev_high_rsi:
-                return 'BEARISH'
-            if recent_low_price < prev_low_price and recent_low_rsi > prev_low_rsi:
-                return 'BULLISH'
-        except Exception:
-            pass
-        return 'NONE'
+        return _smc_detect_div(df)
 
     # ─────────────────────────────────────────────────────────────────────
     # SMC
     # ─────────────────────────────────────────────────────────────────────
     def find_liquidity_levels(self, df: pd.DataFrame) -> dict:
-        recent = df.tail(30)
-        bsl = recent['high'].nlargest(3).tolist()
-        ssl = recent['low'].nsmallest(3).tolist()
-        return {'bsl': bsl, 'ssl': ssl}
+        return _smc_find_liq(df)
 
     def find_order_blocks(self, df: pd.DataFrame) -> list:
-        obs = []
-        for i in range(5, len(df) - 3):
-            candle = df.iloc[i]
-            body_size = abs(candle['close'] - candle['open']) / candle['open']
-            if body_size > 0.004:
-                next3 = df.iloc[i + 1:i + 4]
-                move = (next3['close'].iloc[-1] - candle['close']) / candle['close']
-                if move > 0.008:
-                    # Bullish OB = last BEARISH candle before upward move (demand zone)
-                    # Zone: candle low → candle high; key entry level = candle open (top of body)
-                    if candle['close'] < candle['open']:
-                        obs.append({
-                            'price': float(candle['open']),   # top of bearish body = entry trigger
-                            'top':   float(candle['high']),
-                            'bot':   float(candle['low']),
-                            'type':  'bullish',
-                            'time':  str(df.index[i]),
-                        })
-                elif move < -0.008:
-                    # Bearish OB = last BULLISH candle before downward move (supply zone)
-                    # Zone: candle low → candle high; key entry level = candle open (bottom of body)
-                    if candle['close'] > candle['open']:
-                        obs.append({
-                            'price': float(candle['open']),   # bottom of bullish body = entry trigger
-                            'top':   float(candle['high']),
-                            'bot':   float(candle['low']),
-                            'type':  'bearish',
-                            'time':  str(df.index[i]),
-                        })
-        return obs[-3:]
+        return _smc_find_obs(df)
 
     def find_fvgs(self, df: pd.DataFrame) -> list:
-        """Detect Fair Value Gaps with fill and partial-fill detection."""
-        fvgs = []
-        for i in range(1, len(df) - 1):
-            prev = df.iloc[i - 1]
-            nxt  = df.iloc[i + 1]
-            subsequent = df.iloc[i + 2:]
-
-            if nxt['low'] > prev['high']:
-                top      = float(nxt['low'])
-                bot      = float(prev['high'])
-                gap_size = top - bot
-                filled   = False
-                max_fill = 0.0
-                for _, sc in subsequent.iterrows():
-                    # Bull FVG filled when any wick enters the gap (low, not close)
-                    if sc['low'] <= bot:
-                        filled = True
-                        break
-                    fill_down = top - max(float(sc['low']), bot)
-                    max_fill  = max(max_fill, min(fill_down / gap_size * 100, 100) if gap_size > 0 else 0)
-                if not filled:
-                    fvgs.append({'type': 'bull', 'top': top, 'bot': bot,
-                                 'filled': False, 'partial_fill_pct': round(max_fill, 1)})
-
-            if nxt['high'] < prev['low']:
-                top      = float(prev['low'])
-                bot      = float(nxt['high'])
-                gap_size = top - bot
-                filled   = False
-                max_fill = 0.0
-                for _, sc in subsequent.iterrows():
-                    # Bear FVG filled when any wick enters the gap (high, not close)
-                    if sc['high'] >= top:
-                        filled = True
-                        break
-                    fill_up  = min(float(sc['high']), top) - bot
-                    max_fill = max(max_fill, min(fill_up / gap_size * 100, 100) if gap_size > 0 else 0)
-                if not filled:
-                    fvgs.append({'type': 'bear', 'top': top, 'bot': bot,
-                                 'filled': False, 'partial_fill_pct': round(max_fill, 1)})
-
-        return fvgs[-4:]
+        return _smc_find_fvgs(df)
 
     def market_structure(self, df: pd.DataFrame) -> str:
         last = df.iloc[-1]

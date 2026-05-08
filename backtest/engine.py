@@ -23,6 +23,10 @@ import pandas as pd
 
 from indicators import compute_indicators
 from signal_logic import generate_signal
+from smc import (find_fvgs as _find_fvgs,
+                 find_order_blocks as _find_obs,
+                 find_liquidity_levels as _find_liq,
+                 detect_rsi_divergence as _detect_rsi_div)
 
 
 # ── constants ──────────────────────────────────────────────────────────────────
@@ -31,48 +35,6 @@ SLIPPAGE_PCT = 0.0002   # 0.02%
 TP1_FRAC     = 0.50
 TP2_FRAC     = 0.30
 TP3_FRAC     = 0.20
-
-
-# ── SMC helpers (pure, no exchange) ───────────────────────────────────────────
-
-def _find_fvgs(df: pd.DataFrame) -> list:
-    fvgs = []
-    arr = df[['high', 'low']].values
-    n = len(arr)
-    for i in range(1, n - 1):
-        prev_high, nxt_low = arr[i - 1][0], arr[i + 1][1]
-        if nxt_low > prev_high:
-            fvgs.append({'type': 'bull', 'top': float(nxt_low), 'bot': float(prev_high)})
-        prev_low, nxt_high = arr[i - 1][1], arr[i + 1][0]
-        if nxt_high < prev_low:
-            fvgs.append({'type': 'bear', 'top': float(prev_low), 'bot': float(nxt_high)})
-    return fvgs[-4:]
-
-
-def _find_obs(df: pd.DataFrame) -> list:
-    obs = []
-    closes = df['close'].values
-    opens  = df['open'].values
-    highs  = df['high'].values
-    lows   = df['low'].values
-    n = len(df)
-    for i in range(5, n - 3):
-        body = abs(closes[i] - opens[i]) / opens[i]
-        if body > 0.004:
-            move = (closes[min(i + 3, n - 1)] - closes[i]) / closes[i]
-            if move > 0.008 and closes[i] < opens[i]:
-                obs.append({'price': float(opens[i]), 'top': float(highs[i]),
-                            'bot': float(lows[i]), 'type': 'bullish'})
-            elif move < -0.008 and closes[i] > opens[i]:
-                obs.append({'price': float(opens[i]), 'top': float(highs[i]),
-                            'bot': float(lows[i]), 'type': 'bearish'})
-    return obs[-3:]
-
-
-def _find_liq(df: pd.DataFrame) -> dict:
-    recent = df.tail(30)
-    return {'bsl': recent['high'].nlargest(3).tolist(),
-            'ssl': recent['low'].nsmallest(3).tolist()}
 
 
 def _single_tf_bias(df_with_indicators: pd.DataFrame) -> str:
@@ -154,10 +116,11 @@ def _fast_market_data(df: pd.DataFrame, df_4h_bias: pd.Series,
     tf_bias  = {'per_tf': biases, 'overall': overall, 'agreement': max(bulls, bears)}
 
     # SMC (on trailing 100 bars — only computed on potential entry bars)
-    window = df.iloc[max(0, i - 99): i + 1]
-    fvgs   = _find_fvgs(window)
-    obs    = _find_obs(window)
-    liq    = _find_liq(window)
+    window  = df.iloc[max(0, i - 99): i + 1]
+    fvgs    = _find_fvgs(window)
+    obs     = _find_obs(window)
+    liq     = _find_liq(window)
+    rsi_div = _detect_rsi_div(window)
 
     # BB width percentile
     bb_widths = (df['bb_upper'] - df['bb_lower']).iloc[max(0, i - 99): i + 1].dropna()
@@ -183,7 +146,7 @@ def _fast_market_data(df: pd.DataFrame, df_4h_bias: pd.Series,
         'bb_lower':            _f('bb_lower', price),
         'volume_signal':       'NORMAL',
         'volume_trend':        'FLAT',
-        'rsi_divergence':      'NONE',
+        'rsi_divergence':      rsi_div,
         'candle_pattern':      '',
         'timeframe_bias':      tf_bias,
         'fear_greed':          {'value': 50, 'label': 'Neutral'},
