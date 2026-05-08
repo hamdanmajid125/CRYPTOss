@@ -1,5 +1,4 @@
 """Historical OHLCV loader — fetches from ccxt, caches to local Parquet files."""
-import os
 import time
 from pathlib import Path
 
@@ -37,7 +36,7 @@ def load_ohlcv(
         print(f'[DataLoader] {symbol} loaded from cache ({len(df)} bars)')
         return df
 
-    print(f'[DataLoader] Fetching {symbol} {timeframe} {start} → {end} from Binance …')
+    print(f'[DataLoader] Fetching {symbol} {timeframe} {start} to {end} from Binance ...')
     ex = ccxt.binance({'enableRateLimit': True, 'options': {'defaultType': 'future'}})
 
     since_ms = int(pd.Timestamp(start, tz='UTC').timestamp() * 1000)

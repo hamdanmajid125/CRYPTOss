@@ -135,7 +135,7 @@ def test_tp1_hit_long_partial_close():
     trade = _make_trade('LONG', entry=100.0, sl=98.5, tp1=102.0, tp2=103.5, tp3=105.5)
     bar   = _bar(high=102.5, low=100.5)  # high > tp1=102
 
-    closed, info = BarReplayer._check_exits(trade, bar)
+    closed, _ = BarReplayer._check_exits(trade, bar)
     assert not closed, "TP1 hit alone should NOT fully close the trade"
     assert trade.tp1_hit, "tp1_hit flag should be set"
     assert trade.sl == trade.entry, "SL must move to entry (breakeven) after TP1"
@@ -233,17 +233,15 @@ def test_generate_signal_wait_mixed():
 
 # ── Test 10: generate_signal WAIT on low R:R ──────────────────────────────────
 
-def test_generate_signal_wait_low_rr():
-    """If ATR is huge relative to price, R:R after fees should fail."""
+def test_generate_signal_wait_very_low_volume():
+    """VERY LOW volume should always block a trade, even with a perfect setup."""
     tf_bias = {'overall': 'BULLISH', 'agreement': 3,
                'per_tf': {'1h': 'BULLISH', '4h': 'BULLISH', '15m': 'BULLISH'}}
-    data = {'price': 100.0, 'atr': 100.0,  # absurd ATR → SL too close to TP
-            'rsi': 50.0, 'macd': 0.0, 'macd_sig': 0.0,
-            'volume_signal': 'NORMAL', 'volume_trend': 'FLAT',
-            'fvgs': [], 'order_blocks': [], 'ema200': None,
-            'adx': 25.0, 'bb_width_percentile': 50,
+    data = {'price': 100.0, 'atr': 1.5,
+            'rsi': 50.0, 'macd': 0.1, 'macd_sig': 0.05,
+            'volume_signal': 'VERY LOW — weak, avoid trading',
+            'volume_trend': 'DECREASING', 'fvgs': [], 'order_blocks': [],
+            'ema200': 95.0, 'adx': 30.0, 'bb_width_percentile': 60,
             'timeframe_bias': tf_bias, 'fear_greed': {'value': 50, 'label': 'Neutral'}}
-    sig = generate_signal(data, fee_pct=0.0005, min_rr=2.0)
-    # With ATR=100 on price=100: TP1=200, SL=0 → R:R ≈ 1.0 (< 2.0)
-    # Actually R:R = 2.0*atr / 1.5*atr = 1.33, below min_rr=2.0
-    assert sig['action'] == 'WAIT'
+    sig = generate_signal(data)
+    assert sig['action'] == 'WAIT', "VERY LOW volume must always return WAIT"

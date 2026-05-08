@@ -2,23 +2,27 @@
 Event-driven bar-by-bar backtester.
 
 Modes:
-  rules  — signal_logic.generate_signal() only, no LLM
-  llm    — call Claude API for every bar (expensive)
-  hybrid — rules generate signal, LLM veto-only
+  rules  -- signal_logic.generate_signal() only, no LLM
+  llm    -- call Claude API for every bar (expensive)
+  hybrid -- rules generate signal, LLM veto-only
 
 Scale-out:
-  50 % at TP1 → SL → breakeven
+  50 % at TP1 -> SL -> breakeven
   30 % at TP2
   20 % at TP3
+
+Performance note: indicators are computed ONCE on the full DataFrame;
+the 4h bias is looked up per-bar from a pre-built 4h index; SMC features
+(FVGs, OBs, liquidity) are computed only when we actually need to generate
+a new entry signal, keeping the loop O(n).
 """
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 import pandas as pd
 
 from indicators import compute_indicators
-from signal_logic import generate_signal, score_confidence
+from signal_logic import generate_signal
 
 
 # ── constants ──────────────────────────────────────────────────────────────────
@@ -33,35 +37,35 @@ TP3_FRAC     = 0.20
 
 def _find_fvgs(df: pd.DataFrame) -> list:
     fvgs = []
-    for i in range(1, len(df) - 1):
-        prev, nxt = df.iloc[i - 1], df.iloc[i + 1]
-        sub = df.iloc[i + 2:]
-        if nxt['low'] > prev['high']:
-            top, bot = float(nxt['low']), float(prev['high'])
-            filled = any(sc['low'] <= bot for _, sc in sub.iterrows())
-            if not filled:
-                fvgs.append({'type': 'bull', 'top': top, 'bot': bot})
-        if nxt['high'] < prev['low']:
-            top, bot = float(prev['low']), float(nxt['high'])
-            filled = any(sc['high'] >= top for _, sc in sub.iterrows())
-            if not filled:
-                fvgs.append({'type': 'bear', 'top': top, 'bot': bot})
+    arr = df[['high', 'low']].values
+    n = len(arr)
+    for i in range(1, n - 1):
+        prev_high, nxt_low = arr[i - 1][0], arr[i + 1][1]
+        if nxt_low > prev_high:
+            fvgs.append({'type': 'bull', 'top': float(nxt_low), 'bot': float(prev_high)})
+        prev_low, nxt_high = arr[i - 1][1], arr[i + 1][0]
+        if nxt_high < prev_low:
+            fvgs.append({'type': 'bear', 'top': float(prev_low), 'bot': float(nxt_high)})
     return fvgs[-4:]
 
 
 def _find_obs(df: pd.DataFrame) -> list:
     obs = []
-    for i in range(5, len(df) - 3):
-        c = df.iloc[i]
-        body = abs(c['close'] - c['open']) / c['open']
+    closes = df['close'].values
+    opens  = df['open'].values
+    highs  = df['high'].values
+    lows   = df['low'].values
+    n = len(df)
+    for i in range(5, n - 3):
+        body = abs(closes[i] - opens[i]) / opens[i]
         if body > 0.004:
-            move = (df.iloc[i + 3]['close'] - c['close']) / c['close']
-            if move > 0.008 and c['close'] < c['open']:
-                obs.append({'price': float(c['open']), 'top': float(c['high']),
-                            'bot': float(c['low']), 'type': 'bullish'})
-            elif move < -0.008 and c['close'] > c['open']:
-                obs.append({'price': float(c['open']), 'top': float(c['high']),
-                            'bot': float(c['low']), 'type': 'bearish'})
+            move = (closes[min(i + 3, n - 1)] - closes[i]) / closes[i]
+            if move > 0.008 and closes[i] < opens[i]:
+                obs.append({'price': float(opens[i]), 'top': float(highs[i]),
+                            'bot': float(lows[i]), 'type': 'bullish'})
+            elif move < -0.008 and closes[i] > opens[i]:
+                obs.append({'price': float(opens[i]), 'top': float(highs[i]),
+                            'bot': float(lows[i]), 'type': 'bearish'})
     return obs[-3:]
 
 
@@ -71,10 +75,11 @@ def _find_liq(df: pd.DataFrame) -> dict:
             'ssl': recent['low'].nsmallest(3).tolist()}
 
 
-def _tf_bias_from_df(df: pd.DataFrame) -> str:
-    if len(df) < 55:
+def _single_tf_bias(df_with_indicators: pd.DataFrame) -> str:
+    """Compute BULLISH/BEARISH/NEUTRAL bias from a pre-computed indicator df."""
+    if len(df_with_indicators) < 55:
         return 'NEUTRAL'
-    df = df.dropna(subset=['ema20', 'ema50'])
+    df = df_with_indicators.dropna(subset=['ema20', 'ema50'])
     if df.empty:
         return 'NEUTRAL'
     last     = df.iloc[-1]
@@ -88,58 +93,94 @@ def _tf_bias_from_df(df: pd.DataFrame) -> str:
     return 'NEUTRAL'
 
 
-def _build_mtf_bias(df_1h: pd.DataFrame) -> dict:
-    """Derive 15m / 1h / 4h biases from 1h data by resampling."""
-    b1h = _tf_bias_from_df(df_1h)
+def _build_4h_bias_series(df_1h_with_ind: pd.DataFrame) -> pd.Series:
+    """
+    Pre-compute the 4h bias for every 1h timestamp.
+    Returns a pd.Series indexed the same as df_1h, values BULLISH/BEARISH/NEUTRAL.
+    This is computed ONCE and then looked up O(1) per bar.
+    """
+    df_4h = df_1h_with_ind.resample('4H').agg(
+        {'open': 'first', 'high': 'max', 'low': 'min',
+         'close': 'last', 'volume': 'sum'}
+    ).dropna()
+    df_4h = compute_indicators(df_4h)
 
+    # For each 4h bar, compute bias using all preceding 4h bars
+    biases_4h: List[Tuple] = []
+    for i in range(55, len(df_4h)):
+        b = _single_tf_bias(df_4h.iloc[:i + 1])
+        biases_4h.append((df_4h.index[i], b))
+
+    if not biases_4h:
+        return pd.Series('NEUTRAL', index=df_1h_with_ind.index)
+
+    bias_series_4h = pd.Series(
+        [b for _, b in biases_4h],
+        index=[ts for ts, _ in biases_4h],
+    )
+
+    # Forward-fill to 1h frequency
+    combined = bias_series_4h.reindex(
+        df_1h_with_ind.index.union(bias_series_4h.index)
+    ).ffill().reindex(df_1h_with_ind.index).fillna('NEUTRAL')
+    return combined
+
+
+def _fast_market_data(df: pd.DataFrame, df_4h_bias: pd.Series,
+                      i: int, symbol: str) -> dict:
+    """
+    Build market_data dict at bar i using pre-computed indicator columns
+    and 4h bias series. SMC features are computed on a trailing window.
+    """
+    row   = df.iloc[i]
+    price = float(row['close'])
+    atr   = float(row['atr'])   if not pd.isna(row.get('atr', float('nan'))) else 0.0
+    ts    = df.index[i]
+
+    b_1h = _single_tf_bias(df.iloc[max(0, i - 299): i + 1])
+    b_4h = df_4h_bias.get(ts, 'NEUTRAL') if hasattr(df_4h_bias, 'get') else (
+        df_4h_bias.iloc[i] if i < len(df_4h_bias) else 'NEUTRAL')
+    # try proper lookup
     try:
-        df_4h = df_1h.resample('4H').agg(
-            {'open': 'first', 'high': 'max', 'low': 'min',
-             'close': 'last', 'volume': 'sum'}
-        ).dropna()
-        df_4h = compute_indicators(df_4h)
-        b4h = _tf_bias_from_df(df_4h)
-    except Exception:
-        b4h = 'NEUTRAL'
+        b_4h = df_4h_bias[ts]
+    except (KeyError, IndexError):
+        b_4h = 'NEUTRAL'
 
-    b15m = b1h   # 15m not available in 1h backtest; use 1h as proxy
+    b_15m = b_1h  # proxy
+    biases = {'15m': b_15m, '1h': b_1h, '4h': b_4h}
+    bulls  = sum(1 for v in biases.values() if v == 'BULLISH')
+    bears  = sum(1 for v in biases.values() if v == 'BEARISH')
+    overall  = 'BULLISH' if bulls >= 2 else ('BEARISH' if bears >= 2 else 'MIXED')
+    tf_bias  = {'per_tf': biases, 'overall': overall, 'agreement': max(bulls, bears)}
 
-    biases = {'15m': b15m, '1h': b1h, '4h': b4h}
-    bulls = sum(1 for v in biases.values() if v == 'BULLISH')
-    bears = sum(1 for v in biases.values() if v == 'BEARISH')
-    overall = 'BULLISH' if bulls >= 2 else ('BEARISH' if bears >= 2 else 'MIXED')
-    return {'per_tf': biases, 'overall': overall, 'agreement': max(bulls, bears)}
+    # SMC (on trailing 100 bars — only computed on potential entry bars)
+    window = df.iloc[max(0, i - 99): i + 1]
+    fvgs   = _find_fvgs(window)
+    obs    = _find_obs(window)
+    liq    = _find_liq(window)
 
-
-def _build_market_data(df_window: pd.DataFrame, symbol: str = '') -> dict:
-    """Build the market_data dict from a historical window of indicator-enriched data."""
-    last = df_window.iloc[-1]
-    price = float(last['close'])
-    atr   = float(last['atr']) if not pd.isna(last.get('atr', float('nan'))) else 0.0
-
-    tf_bias = _build_mtf_bias(df_window)
-    fvgs    = _find_fvgs(df_window.tail(100))
-    obs     = _find_obs(df_window)
-    liq     = _find_liq(df_window)
-
-    # BB width percentile (last 100 bars)
-    bb_widths = (df_window['bb_upper'] - df_window['bb_lower']).tail(100).dropna()
-    cur_bbw   = float(last['bb_upper'] - last['bb_lower']) if not pd.isna(last.get('bb_upper', float('nan'))) else 0
+    # BB width percentile
+    bb_widths = (df['bb_upper'] - df['bb_lower']).iloc[max(0, i - 99): i + 1].dropna()
+    cur_bbw   = float(row['bb_upper'] - row['bb_lower']) if not pd.isna(row.get('bb_upper', float('nan'))) else 0
     bb_pct    = int((bb_widths < cur_bbw).sum() / len(bb_widths) * 100) if len(bb_widths) > 1 else 50
-    cur_adx   = float(last['adx']) if 'adx' in last.index and not pd.isna(last['adx']) else 25.0
+    cur_adx   = float(row['adx']) if 'adx' in row.index and not pd.isna(row['adx']) else 25.0
+
+    def _f(col, default=0.0):
+        v = row.get(col, float('nan'))
+        return default if pd.isna(v) else float(v)
 
     return {
         'symbol':              symbol,
         'price':               price,
         'atr':                 atr,
-        'rsi':                 float(last['rsi'])     if not pd.isna(last.get('rsi',     float('nan'))) else 50.0,
-        'macd':                float(last['macd'])    if not pd.isna(last.get('macd',    float('nan'))) else 0.0,
-        'macd_sig':            float(last['macd_sig']) if not pd.isna(last.get('macd_sig', float('nan'))) else 0.0,
-        'ema20':               float(last['ema20'])   if not pd.isna(last.get('ema20',   float('nan'))) else price,
-        'ema50':               float(last['ema50'])   if not pd.isna(last.get('ema50',   float('nan'))) else price,
-        'ema200':              None if pd.isna(last.get('ema200', float('nan'))) else float(last['ema200']),
-        'bb_upper':            float(last['bb_upper']) if not pd.isna(last.get('bb_upper', float('nan'))) else price,
-        'bb_lower':            float(last['bb_lower']) if not pd.isna(last.get('bb_lower', float('nan'))) else price,
+        'rsi':                 _f('rsi', 50.0),
+        'macd':                _f('macd'),
+        'macd_sig':            _f('macd_sig'),
+        'ema20':               _f('ema20', price),
+        'ema50':               _f('ema50', price),
+        'ema200':              None if pd.isna(row.get('ema200', float('nan'))) else float(row['ema200']),
+        'bb_upper':            _f('bb_upper', price),
+        'bb_lower':            _f('bb_lower', price),
         'volume_signal':       'NORMAL',
         'volume_trend':        'FLAT',
         'rsi_divergence':      'NONE',
@@ -158,24 +199,23 @@ def _build_market_data(df_window: pd.DataFrame, symbol: str = '') -> dict:
 
 @dataclass
 class Trade:
-    symbol:       str
-    action:       str
-    entry:        float
-    sl:           float
-    tp1:          float
-    tp2:          float
-    tp3:          float
-    confidence:   int
-    position_usdt: float      # full position value in USDT
-    entry_bar:    int
-    entry_time:   object = None
+    symbol:        str
+    action:        str
+    entry:         float
+    sl:            float
+    tp1:           float
+    tp2:           float
+    tp3:           float
+    confidence:    int
+    position_usdt: float
+    entry_bar:     int
+    entry_time:    object = None
 
     tp1_hit:      bool  = False
     tp2_hit:      bool  = False
     realized_pnl: float = 0.0
 
     def qty_remaining_frac(self) -> float:
-        """Remaining fraction of original position."""
         frac = 1.0
         if self.tp1_hit:
             frac -= TP1_FRAC
@@ -188,14 +228,58 @@ class Trade:
 
 def _fill_pnl(action: str, entry: float, exit_price: float,
               frac: float, position_usdt: float) -> float:
-    """Net PnL for a partial or full close, after fees + slippage (round-trip)."""
     partial_usdt = position_usdt * frac
-    if action == 'LONG':
-        raw_ret = (exit_price - entry) / entry
-    else:
-        raw_ret = (entry - exit_price) / entry
+    raw_ret = ((exit_price - entry) / entry if action == 'LONG'
+               else (entry - exit_price) / entry)
     cost = 2 * (FEE_PCT + SLIPPAGE_PCT)
     return partial_usdt * (raw_ret - cost)
+
+
+# ── Exit checker ───────────────────────────────────────────────────────────────
+
+def _check_exits(trade: Trade, bar: pd.Series) -> Tuple[bool, Optional[dict]]:
+    hi, lo = bar['high'], bar['low']
+    action = trade.action
+
+    def _close_all(exit_price, reason):
+        pnl = _fill_pnl(action, trade.entry, exit_price,
+                        trade.qty_remaining_frac(), trade.position_usdt)
+        trade.realized_pnl += pnl
+        return True, {'exit_price': exit_price, 'exit_reason': reason,
+                      'pnl_usdt': trade.realized_pnl,
+                      'confidence': trade.confidence, 'exit_time': bar.name}
+
+    # SL
+    if action == 'LONG' and lo <= trade.sl:
+        return _close_all(trade.sl, 'SL_HIT')
+    if action == 'SHORT' and hi >= trade.sl:
+        return _close_all(trade.sl, 'SL_HIT')
+
+    # TP1
+    if not trade.tp1_hit:
+        if (action == 'LONG' and hi >= trade.tp1) or (action == 'SHORT' and lo <= trade.tp1):
+            pnl = _fill_pnl(action, trade.entry, trade.tp1, TP1_FRAC, trade.position_usdt)
+            trade.realized_pnl += pnl
+            trade.tp1_hit = True
+            trade.sl = trade.entry   # move to BE
+
+    # TP2
+    if trade.tp1_hit and not trade.tp2_hit:
+        if (action == 'LONG' and hi >= trade.tp2) or (action == 'SHORT' and lo <= trade.tp2):
+            pnl = _fill_pnl(action, trade.entry, trade.tp2, TP2_FRAC, trade.position_usdt)
+            trade.realized_pnl += pnl
+            trade.tp2_hit = True
+
+    # TP3
+    if trade.tp1_hit and trade.tp2_hit:
+        if (action == 'LONG' and hi >= trade.tp3) or (action == 'SHORT' and lo <= trade.tp3):
+            pnl = _fill_pnl(action, trade.entry, trade.tp3, TP3_FRAC, trade.position_usdt)
+            trade.realized_pnl += pnl
+            return True, {'exit_price': trade.tp3, 'exit_reason': 'TP3_HIT',
+                          'pnl_usdt': trade.realized_pnl,
+                          'confidence': trade.confidence, 'exit_time': bar.name}
+
+    return False, None
 
 
 # ── Main engine ────────────────────────────────────────────────────────────────
@@ -206,13 +290,12 @@ class BarReplayer:
 
     Parameters
     ----------
-    symbol         : Trading pair, e.g. 'BTC/USDT'
-    timeframe      : '1h' (only value supported in the backtester today)
+    symbol         : e.g. 'BTC/USDT'
     initial_capital: Starting USDT balance
     risk_pct       : Percent of capital risked per trade
     mode           : 'rules' | 'llm' | 'hybrid'
-    warmup         : Number of bars to skip at the start (for indicator warm-up)
-    min_confidence : Minimum rule-score to enter a trade (rules / hybrid mode)
+    warmup         : Bars to skip while indicators warm up
+    min_confidence : Minimum rule-score to enter a trade
     """
 
     def __init__(
@@ -233,9 +316,7 @@ class BarReplayer:
         self.mode     = mode
         self.warmup   = warmup
         self.min_conf = min_confidence
-        self.agent    = agent   # ClaudeAgent instance (llm / hybrid modes)
-
-    # ── helpers ────────────────────────────────────────────────────────────────
+        self.agent    = agent
 
     def _position_usdt(self, capital: float, entry: float, sl: float) -> float:
         risk_usdt   = capital * self.risk_pct / 100
@@ -247,14 +328,11 @@ class BarReplayer:
     def _get_signal(self, market_data: dict) -> dict:
         if self.mode == 'rules':
             return generate_signal(market_data, min_confidence=self.min_conf)
-
         if self.mode == 'llm' and self.agent:
             try:
                 return self.agent.get_signal(market_data)
             except Exception as e:
-                print(f'[Backtest] LLM call failed: {e}')
                 return {'action': 'WAIT', 'reason': str(e)}
-
         if self.mode == 'hybrid' and self.agent:
             sig = generate_signal(market_data, min_confidence=self.min_conf)
             if sig['action'] == 'WAIT':
@@ -266,131 +344,64 @@ class BarReplayer:
                 adj = veto.get('confidence_adjustment', 0)
                 sig['confidence'] = max(0, min(100, sig['confidence'] + adj))
                 if sig['confidence'] < self.min_conf:
-                    return {'action': 'WAIT', 'reason': f'Post-veto conf {sig["confidence"]} < {self.min_conf}'}
-            except Exception as e:
-                print(f'[Backtest] LLM veto failed: {e}')
+                    return {'action': 'WAIT', 'reason': f'Post-veto conf low'}
+            except Exception:
+                pass
             return sig
-
         return generate_signal(market_data, min_confidence=self.min_conf)
 
+    # also expose as static for tests
     @staticmethod
     def _check_exits(trade: Trade, bar: pd.Series) -> Tuple[bool, Optional[dict]]:
-        """
-        Check a bar against the trade's exit levels.
-        Returns (trade_closed, exit_info_or_None).
-        Partial closes update trade in-place and return (False, None).
-        """
-        hi, lo = bar['high'], bar['low']
-        action = trade.action
-
-        # SL check (highest priority)
-        if action == 'LONG' and lo <= trade.sl:
-            pnl = _fill_pnl(action, trade.entry, trade.sl,
-                            trade.qty_remaining_frac(), trade.position_usdt)
-            trade.realized_pnl += pnl
-            return True, {
-                'exit_price': trade.sl, 'exit_reason': 'SL_HIT',
-                'pnl_usdt': trade.realized_pnl, 'confidence': trade.confidence,
-                'exit_time': bar.name,
-            }
-        if action == 'SHORT' and hi >= trade.sl:
-            pnl = _fill_pnl(action, trade.entry, trade.sl,
-                            trade.qty_remaining_frac(), trade.position_usdt)
-            trade.realized_pnl += pnl
-            return True, {
-                'exit_price': trade.sl, 'exit_reason': 'SL_HIT',
-                'pnl_usdt': trade.realized_pnl, 'confidence': trade.confidence,
-                'exit_time': bar.name,
-            }
-
-        # TP1
-        if not trade.tp1_hit:
-            tp1_hit = (action == 'LONG' and hi >= trade.tp1) or \
-                      (action == 'SHORT' and lo <= trade.tp1)
-            if tp1_hit:
-                pnl = _fill_pnl(action, trade.entry, trade.tp1,
-                                TP1_FRAC, trade.position_usdt)
-                trade.realized_pnl += pnl
-                trade.tp1_hit = True
-                trade.sl = trade.entry   # move SL to breakeven
-
-        # TP2
-        if trade.tp1_hit and not trade.tp2_hit:
-            tp2_hit = (action == 'LONG' and hi >= trade.tp2) or \
-                      (action == 'SHORT' and lo <= trade.tp2)
-            if tp2_hit:
-                pnl = _fill_pnl(action, trade.entry, trade.tp2,
-                                TP2_FRAC, trade.position_usdt)
-                trade.realized_pnl += pnl
-                trade.tp2_hit = True
-
-        # TP3 — full close of remaining 20 %
-        if trade.tp1_hit and trade.tp2_hit:
-            tp3_hit = (action == 'LONG' and hi >= trade.tp3) or \
-                      (action == 'SHORT' and lo <= trade.tp3)
-            if tp3_hit:
-                pnl = _fill_pnl(action, trade.entry, trade.tp3,
-                                TP3_FRAC, trade.position_usdt)
-                trade.realized_pnl += pnl
-                return True, {
-                    'exit_price': trade.tp3, 'exit_reason': 'TP3_HIT',
-                    'pnl_usdt': trade.realized_pnl, 'confidence': trade.confidence,
-                    'exit_time': bar.name,
-                }
-
-        return False, None
-
-    # ── main loop ──────────────────────────────────────────────────────────────
+        return _check_exits(trade, bar)
 
     def run(self, df: pd.DataFrame) -> Tuple[list, list]:
-        """
-        Run the backtest on a pre-loaded indicator-enriched DataFrame.
-        Returns (trades, equity_curve).
-        """
+        """Run the backtest. Returns (trades, equity_curve)."""
+        # Pre-compute all indicators ONCE
+        print(f'[Backtest] Computing indicators for {len(df)} bars ...')
         df = compute_indicators(df)
         df = df.dropna(subset=['ema20', 'ema50', 'rsi', 'atr', 'macd'])
+        print(f'[Backtest] {len(df)} usable bars after warm-up. Building 4h bias series ...')
 
-        capital     = self.initial
-        equity      = [capital]
-        trades      = []
+        # Pre-compute 4h bias for every 1h bar (done once, O(n) lookup later)
+        df_4h_bias = _build_4h_bias_series(df)
+        print(f'[Backtest] Starting bar replay ({len(df) - self.warmup} bars) ...')
+
+        capital:    float          = self.initial
+        equity:     list           = [capital]
+        trades:     list           = []
         open_trade: Optional[Trade] = None
 
         for i in range(self.warmup, len(df)):
             bar = df.iloc[i]
 
-            # 1. Process open trade exits
             if open_trade is not None:
-                closed, exit_info = self._check_exits(open_trade, bar)
+                closed, exit_info = _check_exits(open_trade, bar)
                 if closed:
                     capital += open_trade.realized_pnl
-                    rec = {
-                        'symbol':      open_trade.symbol,
-                        'action':      open_trade.action,
-                        'entry':       open_trade.entry,
-                        'entry_time':  str(open_trade.entry_time),
-                        'exit_time':   str(exit_info['exit_time']),
-                        'exit_price':  exit_info['exit_price'],
-                        'exit_reason': exit_info['exit_reason'],
-                        'pnl_usdt':    round(open_trade.realized_pnl, 4),
-                        'confidence':  open_trade.confidence,
-                        'tp1':         open_trade.tp1,
-                        'sl':          open_trade.sl,
+                    trades.append({
+                        'symbol':        open_trade.symbol,
+                        'action':        open_trade.action,
+                        'entry':         open_trade.entry,
+                        'entry_time':    str(open_trade.entry_time),
+                        'exit_time':     str(exit_info['exit_time']),
+                        'exit_price':    exit_info['exit_price'],
+                        'exit_reason':   exit_info['exit_reason'],
+                        'pnl_usdt':      round(open_trade.realized_pnl, 4),
+                        'confidence':    open_trade.confidence,
+                        'tp1':           open_trade.tp1,
+                        'sl':            open_trade.sl,
                         'capital_after': round(capital, 2),
-                    }
-                    trades.append(rec)
+                    })
                     open_trade = None
 
             equity.append(capital)
 
-            # 2. Check for new entry (only one trade at a time)
-            if open_trade is not None:
+            if open_trade is not None or capital <= 0:
                 continue
-            if capital <= 0:
-                break
 
-            window = df.iloc[max(0, i - 299): i + 1]
             try:
-                market_data = _build_market_data(window, self.symbol)
+                market_data = _fast_market_data(df, df_4h_bias, i, self.symbol)
             except Exception:
                 continue
 
@@ -399,111 +410,90 @@ class BarReplayer:
                 continue
 
             entry_price = float(bar['close'])
-            if signal['action'] == 'LONG':
-                actual_entry = entry_price * (1 + SLIPPAGE_PCT)
-            else:
-                actual_entry = entry_price * (1 - SLIPPAGE_PCT)
+            slip = SLIPPAGE_PCT
+            actual_entry = (entry_price * (1 + slip) if signal['action'] == 'LONG'
+                            else entry_price * (1 - slip))
 
             pos_usdt = self._position_usdt(capital, actual_entry, signal['sl'])
             if pos_usdt <= 0:
                 continue
 
             open_trade = Trade(
-                symbol        = self.symbol,
-                action        = signal['action'],
-                entry         = actual_entry,
-                sl            = signal['sl'],
-                tp1           = signal['tp1'],
-                tp2           = signal['tp2'],
-                tp3           = signal['tp3'],
-                confidence    = signal['confidence'],
-                position_usdt = pos_usdt,
-                entry_bar     = i,
-                entry_time    = bar.name,
+                symbol=self.symbol, action=signal['action'],
+                entry=actual_entry, sl=signal['sl'],
+                tp1=signal['tp1'], tp2=signal['tp2'], tp3=signal['tp3'],
+                confidence=signal['confidence'], position_usdt=pos_usdt,
+                entry_bar=i, entry_time=bar.name,
             )
 
-        # Close any remaining open trade at last bar
+        # Close any open trade at end of data
         if open_trade is not None:
-            last_bar = df.iloc[-1]
-            exit_price = float(last_bar['close'])
-            pnl = _fill_pnl(open_trade.action, open_trade.entry, exit_price,
-                            open_trade.qty_remaining_frac(), open_trade.position_usdt)
+            last = df.iloc[-1]
+            ep   = float(last['close'])
+            pnl  = _fill_pnl(open_trade.action, open_trade.entry, ep,
+                              open_trade.qty_remaining_frac(), open_trade.position_usdt)
             open_trade.realized_pnl += pnl
             capital += open_trade.realized_pnl
             trades.append({
-                'symbol':        open_trade.symbol,
-                'action':        open_trade.action,
-                'entry':         open_trade.entry,
-                'entry_time':    str(open_trade.entry_time),
-                'exit_time':     str(last_bar.name),
-                'exit_price':    exit_price,
-                'exit_reason':   'END_OF_DATA',
-                'pnl_usdt':      round(open_trade.realized_pnl, 4),
-                'confidence':    open_trade.confidence,
-                'tp1':           open_trade.tp1,
-                'sl':            open_trade.sl,
-                'capital_after': round(capital, 2),
+                'symbol': open_trade.symbol, 'action': open_trade.action,
+                'entry': open_trade.entry, 'entry_time': str(open_trade.entry_time),
+                'exit_time': str(last.name), 'exit_price': ep,
+                'exit_reason': 'END_OF_DATA',
+                'pnl_usdt': round(open_trade.realized_pnl, 4),
+                'confidence': open_trade.confidence, 'tp1': open_trade.tp1,
+                'sl': open_trade.sl, 'capital_after': round(capital, 2),
             })
             equity.append(capital)
 
+        print(f'[Backtest] Done. {len(trades)} trades closed.')
         return trades, equity
-
-    # ── walk-forward ───────────────────────────────────────────────────────────
 
     def walk_forward(
         self, df: pd.DataFrame,
         train_months: int = 6,
-        test_months: int  = 2,
+        test_months:  int = 2,
     ) -> Tuple[list, list]:
-        """
-        Rolling walk-forward: train_months in-sample, test_months out-of-sample.
-        Returns (all_oos_trades, oos_equity) concatenated across all windows.
-        """
+        """Rolling walk-forward: train_months in-sample, test_months out-of-sample."""
         df = compute_indicators(df)
         df = df.dropna(subset=['ema20', 'ema50', 'rsi', 'atr', 'macd'])
 
-        bars_per_month = 30 * 24   # 1h bars
-        train_len = train_months * bars_per_month
-        test_len  = test_months  * bars_per_month
+        bars_per_month = 30 * 24
+        train_len  = train_months * bars_per_month
+        test_len   = test_months  * bars_per_month
         window_len = train_len + test_len
 
         all_trades: list = []
         oos_equity: list = [self.initial]
         capital = self.initial
-
-        start = 0
         window_num = 0
+        start = 0
+
         while start + window_len <= len(df):
             oos_start = start + train_len
             oos_end   = start + window_len
             df_oos    = df.iloc[oos_start:oos_end]
 
             replayer = BarReplayer(
-                symbol          = self.symbol,
-                timeframe       = self.tf,
-                initial_capital = capital,
-                risk_pct        = self.risk_pct,
-                mode            = self.mode,
-                warmup          = self.warmup,
-                min_confidence  = self.min_conf,
-                agent           = self.agent,
+                symbol=self.symbol, timeframe=self.tf,
+                initial_capital=capital, risk_pct=self.risk_pct,
+                mode=self.mode, warmup=self.warmup,
+                min_confidence=self.min_conf, agent=self.agent,
             )
-            window_trades, window_eq = replayer.run(df_oos)
-
-            for t in window_trades:
+            wt, weq = replayer.run(df_oos)
+            for t in wt:
                 t['walk_forward_window'] = window_num
-            all_trades.extend(window_trades)
+            all_trades.extend(wt)
 
-            if len(window_eq) > 1:
-                # Chain equity curves: scale by ratio from last known capital
+            if len(weq) > 1:
                 ratio = capital / self.initial if self.initial > 0 else 1.0
-                oos_equity.extend(e * ratio for e in window_eq[1:])
-                capital = window_eq[-1] * ratio
+                oos_equity.extend(e * ratio for e in weq[1:])
+                capital = weq[-1] * ratio
 
             start += test_len
             window_num += 1
-            print(f'[WalkForward] window {window_num}: '
-                  f'{df_oos.index[0].date()} → {df_oos.index[-1].date()} '
-                  f'| {len(window_trades)} trades')
+            if df_oos.index is not None and len(df_oos):
+                print(f'[WalkFwd] window {window_num}: '
+                      f'{df_oos.index[0].date()} to {df_oos.index[-1].date()} '
+                      f'| {len(wt)} trades')
 
         return all_trades, oos_equity

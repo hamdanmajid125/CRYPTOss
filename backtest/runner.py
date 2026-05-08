@@ -36,7 +36,7 @@ def run_single(
     metrics = compute_metrics(trades, equity, initial_capital=capital)
     label   = _label(symbol, mode, start, end)
 
-    print_metrics_table(metrics, label=f'{symbol} | {mode} | {start} → {end}')
+    print_metrics_table(metrics, label=f'{symbol} | {mode} | {start} to {end}')
     save_results(trades, equity, metrics, out_dir=RESULTS_DIR, label=label)
     return metrics
 
@@ -54,7 +54,7 @@ def run_walk_forward(
     metrics = compute_metrics(trades, equity, initial_capital=capital)
     label   = _label(symbol, mode + '_wf', start, end)
 
-    print_metrics_table(metrics, label=f'{symbol} | {mode} WALK-FORWARD | {start} → {end}')
+    print_metrics_table(metrics, label=f'{symbol} | {mode} WALK-FORWARD | {start} to {end}')
     save_results(trades, equity, metrics, out_dir=RESULTS_DIR, label=label)
     return metrics
 
@@ -108,12 +108,12 @@ def main():
                     print(f'[Runner] {sym} {m} failed: {e}')
 
         # Print summary table
-        print('\n' + '═' * 80)
-        print('  SUMMARY — ALL SYMBOLS × MODES')
-        print('═' * 80)
+        print('\n' + '=' * 80)
+        print('  SUMMARY - ALL SYMBOLS x MODES')
+        print('=' * 80)
         hdr = f"  {'Symbol':<12} {'Mode':<8} {'Return%':>9} {'Sharpe':>8} {'MaxDD%':>8} {'Trades':>7} {'WinRate%':>9}"
         print(hdr)
-        print('─' * 80)
+        print('-' * 80)
         for r in summary:
             print(f"  {r['symbol']:<12} {r['mode']:<8} "
                   f"{r['total_return_pct']:>+8.2f}% "
@@ -121,7 +121,7 @@ def main():
                   f"{r['max_dd_pct']:>7.2f}% "
                   f"{r['n_trades']:>7} "
                   f"{r['win_rate_pct']:>8.1f}%")
-        print('═' * 80)
+        print('=' * 80)
         return
 
     fn = run_walk_forward if args.walk_forward else run_single

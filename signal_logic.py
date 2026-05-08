@@ -142,7 +142,9 @@ def generate_signal(
         tp1   = entry + 2.0 * atr
         tp2   = entry + 3.5 * atr
         tp3   = entry + 5.5 * atr
-        eff_reward = (tp1 - entry) - 2 * fee_pct * entry
+        # Weighted reward across scale-out (50%@TP1, 30%@TP2, 20%@TP3)
+        weighted_reward = 0.5 * (tp1 - entry) + 0.3 * (tp2 - entry) + 0.2 * (tp3 - entry)
+        eff_reward = weighted_reward - 2 * fee_pct * entry
         eff_risk   = (entry - sl) + 2 * fee_pct * entry
     else:
         entry = price
@@ -150,7 +152,8 @@ def generate_signal(
         tp1   = entry - 2.0 * atr
         tp2   = entry - 3.5 * atr
         tp3   = entry - 5.5 * atr
-        eff_reward = (entry - tp1) - 2 * fee_pct * entry
+        weighted_reward = 0.5 * (entry - tp1) + 0.3 * (entry - tp2) + 0.2 * (entry - tp3)
+        eff_reward = weighted_reward - 2 * fee_pct * entry
         eff_risk   = (sl - entry) + 2 * fee_pct * entry
 
     rr = eff_reward / eff_risk if eff_risk > 0 else 0.0

@@ -63,7 +63,7 @@ def compute_metrics(trades: List[dict], equity_curve: List[float],
             dd_len = 0
 
     # Trade stats
-    pnls       = [t.get('pnl', 0.0) for t in trades]
+    pnls       = [t.get('pnl_usdt', t.get('pnl', 0.0)) for t in trades]
     wins       = [p for p in pnls if p > 0]
     losses     = [p for p in pnls if p <= 0]
     win_rate   = len(wins) / n * 100 if n else 0
@@ -111,8 +111,12 @@ def save_results(
     out_dir: str,
     label: str,
 ) -> None:
-    """Save trades CSV, equity CSV, and equity PNG to out_dir/label.*"""
+    """Save trades CSV, equity CSV, equity PNG, and metrics JSON to out_dir/label.*"""
+    import json
     Path(out_dir).mkdir(parents=True, exist_ok=True)
+
+    with open(os.path.join(out_dir, f'{label}_metrics.json'), 'w') as f:
+        json.dump(metrics, f, indent=2)
 
     # Trades CSV
     if trades:
@@ -127,7 +131,7 @@ def save_results(
     if _HAS_MPL:
         _, ax = plt.subplots(figsize=(12, 5))
         ax.plot(equity_curve, linewidth=1)
-        ax.set_title(f'{label} — equity curve')
+        ax.set_title(f'{label} - equity curve')
         ax.set_xlabel('Bar')
         ax.set_ylabel('Capital (USDT)')
         ax.grid(True, alpha=0.3)
@@ -137,7 +141,7 @@ def save_results(
 
 
 def print_metrics_table(metrics: dict, label: str = '') -> None:
-    sep = '─' * 54
+    sep = '-' * 54
     print(f'\n{sep}')
     if label:
         print(f'  {label}')
