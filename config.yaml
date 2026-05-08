@@ -1,0 +1,68 @@
+# ── Signal generation ─────────────────────────────────────────────────────────
+signal:
+  sl_mult:              1.5    # SL = entry ± sl_mult * ATR
+  tp1_mult:             2.0
+  tp2_mult:             3.5
+  tp3_mult:             5.5
+  fee_pct:              0.0005 # taker fee per side
+  min_rr:               2.0    # effective R:R after fees
+  min_confidence:       65
+  adx_chop_threshold:   25     # ADX below this AND bb low → chop (raised from 18)
+  bb_pct_chop:          30     # BB width percentile below this → chop
+  # Strategy quality gates
+  ema200_hard_gate:     true   # block counter-trend entries (price vs EMA200)
+  session_filter:       true   # only trade London+NY hours
+  session_start_utc:    8
+  session_end_utc:      20
+  confluence_required:  true   # must be inside a bullish/bearish FVG or OB zone
+
+# ── Risk management ───────────────────────────────────────────────────────────
+risk:
+  account_usdt:          10000.0
+  risk_pct:              1.0
+  max_trade_usdt:        150.0
+  min_confidence:        72
+  daily_loss_limit:      250.0
+  min_rr:                3.0
+  max_concurrent:        3
+  # ATR% normalisation
+  atr_pct_threshold:     0.025  # scale down when ATR/entry > this
+  # Per-symbol cooldown
+  cooldown_close_sec:    3600   # 60 min after any close
+  cooldown_stop_sec:     7200   # 120 min after a stop-out
+  # Drawdown
+  drawdown_halt_pct:     10.0
+  drawdown_reduce_pct:   5.0
+  # Consecutive-loss pause
+  consec_3_pause_sec:    7200   # 2 h after 3 consecutive losses
+  consec_5_pause_sec:    259200 # 72 h after 5 consecutive losses
+  single_loss_pct:       3.0    # pause after a single loss this large (% of account)
+  single_loss_pause_sec: 3600   # 1 h pause
+  # TP1 ATR gates
+  tp1_atr_min:           0.5
+  tp1_atr_max:           3.0
+
+# ── SMC detection ────────────────────────────────────────────────────────────
+smc:
+  fvg_max:               5
+  ob_max:                6
+  rsi_lookback:          50
+  liq_lookback:          50
+  liq_cluster_atr_mult:  0.3
+  liq_min_cluster:       2
+  liq_swept_atr_mult:    0.1
+  pivot_lookback:        2
+
+# ── Scanner ──────────────────────────────────────────────────────────────────
+scanner:
+  top_n_coins:           20
+  scan_interval_seconds: 300
+  batch_size:            5
+  pre_score_threshold:   55
+
+# ── Observability ────────────────────────────────────────────────────────────
+observability:
+  signals_log:                signals.jsonl
+  closes_log:                 closes.jsonl
+  rolling_window_days:        30
+  expectancy_pause_threshold: -1.0  # pause if 30-day expectancy falls below this

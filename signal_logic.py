@@ -87,6 +87,16 @@ def score_confidence(data: dict, tf_bias: dict, fng: dict) -> int:
     elif overall == 'BULLISH' and macd < macd_sig:   score -= 8
     elif overall == 'BEARISH' and macd > macd_sig:   score -= 8
 
+    # Funding rate: penalise when crowd is over-leveraged in our direction
+    fr_rate = data.get('funding_rate', {}).get('rate', 0.0)  # already in %
+    if   overall == 'BULLISH' and fr_rate >  0.05: score -= 10  # longs over-leveraged
+    elif overall == 'BEARISH' and fr_rate < -0.05: score -= 10  # shorts over-leveraged
+    elif overall == 'BEARISH' and fr_rate >  0.10: score += 10  # crowd extreme long → SHORT confirmed
+
+    # OI compression: deleveraging undercuts trend conviction
+    if data.get('open_interest', {}).get('compressed'):
+        score -= 5
+
     return max(0, min(100, score))
 
 
@@ -95,6 +105,18 @@ def generate_signal(
     fee_pct: float = 0.0005,
     min_rr: float = 2.0,
     min_confidence: int = 65,
+    sl_mult: float = 1.5,
+    tp1_mult: float = 2.0,
+    tp2_mult: float = 3.5,
+    tp3_mult: float = 5.5,
+    adx_chop_threshold: float = 18.0,
+    bb_pct_chop: float = 30.0,
+    # Strategy quality gates (default off — enabled via config in production)
+    ema200_hard_gate:   bool = False,
+    session_filter:     bool = False,
+    session_start_utc:  int  = 8,
+    session_end_utc:    int  = 20,
+    confluence_required: bool = False,
 ) -> dict:
     """
     Pure rule-based signal generator.
@@ -118,11 +140,11 @@ def generate_signal(
     if overall == 'BEARISH' and per_tf.get('4h') == 'BULLISH':
         return {'action': 'WAIT', 'reason': '4H veto: 4H BULLISH kills BEARISH bias'}
 
-    # Regime filter: ADX < 18 AND BB percentile < 30 → chop
+    # Regime filter: ADX < threshold AND BB percentile < threshold → chop
     adx    = market_data.get('adx', 25)
     bb_pct = market_data.get('bb_width_percentile', 50)
-    if (adx is not None and not _is_nan(adx) and adx < 18
-            and not _is_nan(bb_pct) and bb_pct < 30):
+    if (adx is not None and not _is_nan(adx) and adx < adx_chop_threshold
+            and not _is_nan(bb_pct) and bb_pct < bb_pct_chop):
         return {'action': 'WAIT', 'reason': f'Regime: chop (ADX={adx:.1f} BB%={bb_pct})'}
 
     # Volume hard gate
@@ -131,27 +153,69 @@ def generate_signal(
 
     action = 'LONG' if overall == 'BULLISH' else 'SHORT'
 
+    # Session filter: only trade during high-liquidity hours (London + NY)
+    if session_filter:
+        bar_hour = market_data.get('bar_hour_utc')
+        if bar_hour is not None and not (session_start_utc <= bar_hour < session_end_utc):
+            return {'action': 'WAIT',
+                    'reason': f'Session: hour {bar_hour} UTC outside {session_start_utc}-{session_end_utc}'}
+
     price = float(market_data.get('price', 0) or 0)
     atr   = float(market_data.get('atr',   0) or 0)
     if price <= 0 or atr <= 0:
         return {'action': 'WAIT', 'reason': 'price or ATR is zero'}
 
+    # EMA200 hard gate: only trade with the major trend
+    if ema200_hard_gate:
+        ema200 = market_data.get('ema200')
+        if ema200 is not None:
+            if action == 'LONG' and price < ema200:
+                return {'action': 'WAIT',
+                        'reason': f'EMA200: price {price:.2f} below EMA200 {ema200:.2f} for LONG'}
+            if action == 'SHORT' and price > ema200:
+                return {'action': 'WAIT',
+                        'reason': f'EMA200: price {price:.2f} above EMA200 {ema200:.2f} for SHORT'}
+
+    # SMC confluence gate: entry must be at a structural FVG or OB zone
+    if confluence_required:
+        fvgs = market_data.get('fvgs', [])
+        obs  = market_data.get('order_blocks', [])
+        rsi_div = market_data.get('rsi_divergence', 'NONE')
+
+        in_bull_fvg = any(f.get('bot', 0) <= price <= f.get('top', 0)
+                          for f in fvgs if f.get('type') in ('bullish', 'bull'))
+        in_bear_fvg = any(f.get('bot', 0) <= price <= f.get('top', 0)
+                          for f in fvgs if f.get('type') in ('bearish', 'bear'))
+        in_bull_ob  = any(o.get('bot', o.get('price', 0) * 0.999) <= price <=
+                          o.get('top', o.get('price', 0) * 1.001)
+                          for o in obs if o.get('type') == 'bullish')
+        in_bear_ob  = any(o.get('bot', o.get('price', 0) * 0.999) <= price <=
+                          o.get('top', o.get('price', 0) * 1.001)
+                          for o in obs if o.get('type') == 'bearish')
+
+        if action == 'LONG' and not (in_bull_fvg or in_bull_ob or 'BULLISH' in rsi_div):
+            return {'action': 'WAIT',
+                    'reason': 'Confluence: no bullish FVG/OB/RSI-div at entry'}
+        if action == 'SHORT' and not (in_bear_fvg or in_bear_ob or 'BEARISH' in rsi_div):
+            return {'action': 'WAIT',
+                    'reason': 'Confluence: no bearish FVG/OB/RSI-div at entry'}
+
     if action == 'LONG':
         entry = price
-        sl    = entry - 1.5 * atr
-        tp1   = entry + 2.0 * atr
-        tp2   = entry + 3.5 * atr
-        tp3   = entry + 5.5 * atr
+        sl    = entry - sl_mult  * atr
+        tp1   = entry + tp1_mult * atr
+        tp2   = entry + tp2_mult * atr
+        tp3   = entry + tp3_mult * atr
         # Weighted reward across scale-out (50%@TP1, 30%@TP2, 20%@TP3)
         weighted_reward = 0.5 * (tp1 - entry) + 0.3 * (tp2 - entry) + 0.2 * (tp3 - entry)
         eff_reward = weighted_reward - 2 * fee_pct * entry
         eff_risk   = (entry - sl) + 2 * fee_pct * entry
     else:
         entry = price
-        sl    = entry + 1.5 * atr
-        tp1   = entry - 2.0 * atr
-        tp2   = entry - 3.5 * atr
-        tp3   = entry - 5.5 * atr
+        sl    = entry + sl_mult  * atr
+        tp1   = entry - tp1_mult * atr
+        tp2   = entry - tp2_mult * atr
+        tp3   = entry - tp3_mult * atr
         weighted_reward = 0.5 * (entry - tp1) + 0.3 * (entry - tp2) + 0.2 * (entry - tp3)
         eff_reward = weighted_reward - 2 * fee_pct * entry
         eff_risk   = (sl - entry) + 2 * fee_pct * entry

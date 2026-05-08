@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Tuple, List, Dict
+from typing import Tuple, List, Dict, Callable, Optional
 import time
 import datetime
 import json
@@ -15,12 +15,36 @@ class RiskSettings:
     daily_loss_limit: float = 250.0
     min_rr:           float = 3.0
     max_concurrent:   int   = 3
+    # ATR% normalisation
+    atr_pct_threshold:     float = 0.025
+    # Per-symbol cooldown
+    cooldown_close_sec:    int   = 3600
+    cooldown_stop_sec:     int   = 7200
+    # Drawdown thresholds
+    drawdown_halt_pct:     float = 10.0
+    drawdown_reduce_pct:   float = 5.0
+    # Consecutive-loss pause durations
+    consec_3_pause_sec:    int   = 7200
+    consec_5_pause_sec:    int   = 259200
+    single_loss_pct:       float = 3.0
+    single_loss_pause_sec: int   = 3600
+    # TP1 ATR proximity gates
+    tp1_atr_min:           float = 0.5
+    tp1_atr_max:           float = 3.0
 
 
 class RiskManager:
-    def __init__(self, settings: RiskSettings, state_file: str = 'risk_state.json'):
-        self.settings   = settings
-        self.state_file = state_file
+    def __init__(
+        self,
+        settings: RiskSettings,
+        state_file: str = 'risk_state.json',
+        on_alert: Optional[Callable[[str, dict], None]] = None,
+        closes_log: str = 'closes.jsonl',
+    ):
+        self.settings    = settings
+        self.state_file  = state_file
+        self._on_alert   = on_alert
+        self._closes_log = closes_log
         self.open_trades: List[Dict] = []
 
         # Daily stats (reset at midnight UTC)
@@ -43,6 +67,10 @@ class RiskManager:
         # Correlation tracking: symbol -> side
         self.btc_eth_sides: Dict[str, str] = {}
 
+        # Per-symbol cooldown: epoch seconds of last close / last stop-out
+        self.last_close_time: Dict[str, float] = {}
+        self.last_stop_time:  Dict[str, float] = {}
+
         self._load_state()
 
     # ── STATE PERSISTENCE ─────────────────────────────────────────────────────
@@ -61,6 +89,8 @@ class RiskManager:
                 'worst_trade':        self.worst_trade,
                 'current_balance':    self.current_balance,
                 'peak_balance':       self.peak_balance,
+                'last_close_time':    self.last_close_time,
+                'last_stop_time':     self.last_stop_time,
             }
             with open(self.state_file, 'w') as f:
                 json.dump(state, f)
@@ -78,6 +108,8 @@ class RiskManager:
             self.peak_balance    = state.get('peak_balance',    self.settings.account_usdt)
             self.consecutive_losses = state.get('consecutive_losses', 0)
             self.pause_until        = state.get('pause_until', 0.0)
+            self.last_close_time    = state.get('last_close_time', {})
+            self.last_stop_time     = state.get('last_stop_time',  {})
             # Restore daily stats only if the saved day matches today
             if state.get('day_key') == self._utc_day():
                 self.daily_pnl    = state.get('daily_pnl',    0.0)
@@ -125,7 +157,9 @@ class RiskManager:
 
         # Daily loss limit
         if self.daily_pnl <= -self.settings.daily_loss_limit:
-            return False, f'Daily loss limit hit (${self.daily_pnl:.2f}). Trading blocked for today.'
+            msg = f'Daily loss limit hit (${self.daily_pnl:.2f}). Trading blocked for today.'
+            self._fire_alert('daily_loss_limit', {'daily_pnl': self.daily_pnl, 'reason': msg})
+            return False, msg
 
         # Confidence gate
         conf = signal.get('confidence', 0)
@@ -138,8 +172,11 @@ class RiskManager:
 
         # Drawdown protection
         dd_pct = (self.peak_balance - self.current_balance) / self.peak_balance * 100
-        if dd_pct >= 10:
-            return False, f'10% drawdown from peak hit. All trading halted. Drawdown: {dd_pct:.1f}%'
+        if dd_pct >= self.settings.drawdown_halt_pct:
+            msg = (f'{self.settings.drawdown_halt_pct:.0f}% drawdown from peak hit. '
+                   f'All trading halted. Drawdown: {dd_pct:.1f}%')
+            self._fire_alert('drawdown_halt', {'dd_pct': dd_pct, 'reason': msg})
+            return False, msg
 
         # R:R check
         rr = self._parse_rr(signal.get('rr', '0'))
@@ -163,15 +200,28 @@ class RiskManager:
             tp1_dist = (tp1_v - entry_v) if action_v == 'LONG' else (entry_v - tp1_v)
             if tp1_dist > 0:
                 tp1_atr = tp1_dist / atr_v
-                if tp1_atr < 0.5:
-                    return False, (f'TP1 too close: {tp1_atr:.2f}x ATR (min 0.5x) — '
+                if tp1_atr < self.settings.tp1_atr_min:
+                    return False, (f'TP1 too close: {tp1_atr:.2f}x ATR '
+                                   f'(min {self.settings.tp1_atr_min}x) — '
                                    f'fees eat profit at this distance')
-                if tp1_atr > 3.0:
-                    return False, (f'TP1 too far: {tp1_atr:.2f}x ATR (max 3.0x) — '
+                if tp1_atr > self.settings.tp1_atr_max:
+                    return False, (f'TP1 too far: {tp1_atr:.2f}x ATR '
+                                   f'(max {self.settings.tp1_atr_max}x) — '
                                    f'low probability of hitting before reversal')
 
-        # Correlation filter
+        # Per-symbol cooldown
         sym = signal.get('symbol', '')
+        now = time.time()
+        stop_until  = self.last_stop_time.get(sym, 0)  + self.settings.cooldown_stop_sec
+        close_until = self.last_close_time.get(sym, 0) + self.settings.cooldown_close_sec
+        if now < stop_until:
+            remaining = int((stop_until - now) / 60)
+            return False, f'Symbol cooldown: {sym} — {remaining} min remaining after stop-out'
+        if now < close_until:
+            remaining = int((close_until - now) / 60)
+            return False, f'Symbol cooldown: {sym} — {remaining} min remaining after last close'
+
+        # Correlation filter
         action = signal.get('action', '')
         ok, reason = self._correlation_check(sym, action)
         if not ok:
@@ -211,7 +261,7 @@ class RiskManager:
     # ── POSITION SIZING (Kelly-influenced) ─────────────────────────────────────
 
     def position_size(self, entry: float, sl: float,
-                      confidence: int = 70) -> Dict:
+                      confidence: int = 70, atr: float = 0.0) -> Dict:
         base_risk = self.settings.account_usdt * self.settings.risk_pct / 100
         base_risk = min(base_risk, self.settings.max_trade_usdt)
 
@@ -223,10 +273,16 @@ class RiskManager:
         else:
             risk_usdt = base_risk * 0.5
 
-        # Drawdown reduction: 5% drawdown → halve size
+        # Drawdown reduction: at drawdown_reduce_pct → halve size
         dd_pct = (self.peak_balance - self.current_balance) / self.peak_balance * 100
-        if dd_pct >= 5:
+        if dd_pct >= self.settings.drawdown_reduce_pct:
             risk_usdt *= 0.5
+
+        # ATR% normalization: wide-swing assets get smaller size
+        if atr > 0 and entry > 0:
+            atr_pct = atr / entry
+            if atr_pct > self.settings.atr_pct_threshold:
+                risk_usdt *= self.settings.atr_pct_threshold / atr_pct
 
         sl_distance_pct = abs(entry - sl) / entry
         if sl_distance_pct <= 0:
@@ -236,12 +292,15 @@ class RiskManager:
         position_usdt = min(position_usdt, self.settings.max_trade_usdt * 10)
         qty = position_usdt / entry
 
+        thr = self.settings.atr_pct_threshold
+        atr_scale = (thr / (atr / entry)) if (atr > 0 and entry > 0 and atr / entry > thr) else 1.0
         return {
             'risk_usdt':        round(risk_usdt, 2),
             'position_usdt':    round(position_usdt, 2),
             'qty':              round(qty, 6),
             'sl_distance_pct':  round(sl_distance_pct * 100, 2),
             'kelly_multiplier': 2.0 if confidence >= 80 else 1.0,
+            'atr_scale':        round(atr_scale, 3),
         }
 
     # ── TRADE RECORDING ────────────────────────────────────────────────────────
@@ -256,9 +315,19 @@ class RiskManager:
         self._save_state()
 
     def record_close(self, trade_id: str, pnl_usdt: float):
+        closed = next((t for t in self.open_trades if t['id'] == trade_id), None)
         self.open_trades = [t for t in self.open_trades if t['id'] != trade_id]
         self.daily_pnl  += pnl_usdt
         self.current_balance += pnl_usdt
+
+        # Per-symbol cooldown tracking + closes.jsonl
+        if closed:
+            sym = closed['signal'].get('symbol', '')
+            if sym:
+                self.last_close_time[sym] = time.time()
+                if pnl_usdt < 0:
+                    self.last_stop_time[sym] = time.time()
+            self._log_close(trade_id, sym, pnl_usdt)
 
         if pnl_usdt > 0:
             self.daily_wins += 1
@@ -274,17 +343,26 @@ class RiskManager:
         self._save_state()
 
     def _check_pause_conditions(self, pnl_usdt: float):
+        reason = ''
         if self.consecutive_losses >= 5:
-            self.pause_until = time.time() + 259200  # 72 hours
-            print(f'[Risk] 5 consecutive losses — pausing trading for 72 hours')
+            self.pause_until = time.time() + self.settings.consec_5_pause_sec
+            reason = f'5 consecutive losses — pausing {self.settings.consec_5_pause_sec // 3600}h'
+            print(f'[Risk] {reason}')
         elif self.consecutive_losses >= 3:
-            self.pause_until = time.time() + 7200  # 2 hours
-            print(f'[Risk] 3 consecutive losses — pausing trading for 2 hours')
+            self.pause_until = time.time() + self.settings.consec_3_pause_sec
+            reason = f'3 consecutive losses — pausing {self.settings.consec_3_pause_sec // 3600}h'
+            print(f'[Risk] {reason}')
 
         loss_pct = abs(pnl_usdt) / self.settings.account_usdt * 100
-        if loss_pct >= 3:
-            self.pause_until = max(self.pause_until, time.time() + 3600)  # 1 hour
-            print(f'[Risk] Single loss >{loss_pct:.1f}% of account — pausing 1 hour')
+        if loss_pct >= self.settings.single_loss_pct:
+            self.pause_until = max(self.pause_until,
+                                   time.time() + self.settings.single_loss_pause_sec)
+            reason = reason or f'Single loss {loss_pct:.1f}% — pausing {self.settings.single_loss_pause_sec // 60}min'
+            print(f'[Risk] Single loss >{loss_pct:.1f}% of account — pausing')
+
+        if reason:
+            resume_min = int((self.pause_until - time.time()) / 60)
+            self._fire_alert('bot_paused', {'reason': reason, 'minutes': resume_min})
 
     def record_partial_pnl(self, pnl_usdt: float):
         """Update daily PnL and balance for a partial close without removing the trade."""
@@ -361,6 +439,91 @@ class RiskManager:
         rr     = round(reward / risk, 2) if risk else 0
         ev     = round(win_rate * reward - (1 - win_rate) * risk, 4)
         return {'rr': rr, 'ev': ev, 'positive': ev > 0}
+
+    # ── ROLLING METRICS ────────────────────────────────────────────────────────
+
+    def rolling_metrics(self, days: int = 30) -> Dict:
+        """
+        Compute win rate, expectancy, and Sharpe over the last `days` days
+        from closes.jsonl. Auto-pauses if 30-day expectancy turns negative.
+        """
+        cutoff = time.time() - days * 86400
+        closes: list = []
+        if os.path.exists(self._closes_log):
+            try:
+                with open(self._closes_log, encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            rec = json.loads(line)
+                            if rec.get('ts', 0) >= cutoff:
+                                closes.append(rec)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+        if not closes:
+            return {'window_days': days, 'n_trades': 0, 'win_rate': 0.0,
+                    'expectancy': 0.0, 'sharpe': 0.0}
+
+        pnls      = [c['pnl'] for c in closes]
+        wins      = [p for p in pnls if p > 0]
+        losses    = [p for p in pnls if p <= 0]
+        n         = len(pnls)
+        win_rate  = len(wins) / n if n else 0.0
+        expectancy = sum(pnls) / n if n else 0.0
+
+        # Daily-resampled Sharpe (annualised)
+        sharpe = 0.0
+        if n >= 5:
+            import statistics
+            mean_pnl = expectancy
+            std_pnl  = statistics.stdev(pnls) if n > 1 else 1e-9
+            sharpe   = (mean_pnl / std_pnl) * (252 ** 0.5) if std_pnl > 0 else 0.0
+
+        result = {
+            'window_days': days,
+            'n_trades':    n,
+            'win_rate':    round(win_rate * 100, 1),
+            'expectancy':  round(expectancy, 2),
+            'sharpe':      round(sharpe, 3),
+            'avg_win':     round(sum(wins) / len(wins), 2) if wins else 0.0,
+            'avg_loss':    round(sum(losses) / len(losses), 2) if losses else 0.0,
+        }
+
+        # Auto-pause if expectancy is sufficiently negative
+        from config import cfg
+        if expectancy < cfg.observability.expectancy_pause_threshold and n >= 10:
+            pause_sec = self.settings.consec_3_pause_sec
+            self.pause_until = max(self.pause_until, time.time() + pause_sec)
+            reason = f'30-day expectancy ${expectancy:.2f} < threshold — auto-paused'
+            self._fire_alert('bot_paused', {'reason': reason, 'minutes': pause_sec // 60})
+            print(f'[Risk] {reason}')
+
+        return result
+
+    def _log_close(self, trade_id: str, symbol: str, pnl_usdt: float) -> None:
+        try:
+            record = {
+                'ts':       time.time(),
+                'trade_id': trade_id,
+                'symbol':   symbol,
+                'pnl':      round(pnl_usdt, 4),
+            }
+            with open(self._closes_log, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(record) + '\n')
+        except Exception as e:
+            print(f'[Risk] closes_log write failed: {e}')
+
+    def _fire_alert(self, event: str, data: dict) -> None:
+        if self._on_alert:
+            try:
+                self._on_alert(event, data)
+            except Exception as e:
+                print(f'[Risk] Alert callback error ({event}): {e}')
 
     # ── HELPERS ────────────────────────────────────────────────────────────────
 

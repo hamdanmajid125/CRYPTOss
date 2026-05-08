@@ -98,6 +98,7 @@ def _fast_market_data(df: pd.DataFrame, df_4h_bias: pd.Series,
     price = float(row['close'])
     atr   = float(row['atr'])   if not pd.isna(row.get('atr', float('nan'))) else 0.0
     ts    = df.index[i]
+    bar_hour_utc = int(ts.hour) if hasattr(ts, 'hour') else 12
 
     b_1h = _single_tf_bias(df.iloc[max(0, i - 299): i + 1])
     b_4h = df_4h_bias.get(ts, 'NEUTRAL') if hasattr(df_4h_bias, 'get') else (
@@ -155,6 +156,7 @@ def _fast_market_data(df: pd.DataFrame, df_4h_bias: pd.Series,
         'fvgs':                fvgs,
         'adx':                 cur_adx,
         'bb_width_percentile': bb_pct,
+        'bar_hour_utc':        bar_hour_utc,
     }
 
 
@@ -288,16 +290,37 @@ class BarReplayer:
             return 0.0
         return min(risk_usdt / sl_dist_pct, capital * 10)
 
+    def _signal_kwargs(self) -> dict:
+        """Config-driven keyword args forwarded to generate_signal."""
+        try:
+            from config import cfg
+            s = cfg.signal
+            return dict(
+                fee_pct=s.fee_pct, min_rr=s.min_rr,
+                sl_mult=s.sl_mult, tp1_mult=s.tp1_mult,
+                tp2_mult=s.tp2_mult, tp3_mult=s.tp3_mult,
+                adx_chop_threshold=s.adx_chop_threshold,
+                bb_pct_chop=s.bb_pct_chop,
+                ema200_hard_gate=s.ema200_hard_gate,
+                session_filter=s.session_filter,
+                session_start_utc=s.session_start_utc,
+                session_end_utc=s.session_end_utc,
+                confluence_required=s.confluence_required,
+            )
+        except Exception:
+            return {}
+
     def _get_signal(self, market_data: dict) -> dict:
+        kw = {**self._signal_kwargs(), 'min_confidence': self.min_conf}
         if self.mode == 'rules':
-            return generate_signal(market_data, min_confidence=self.min_conf)
+            return generate_signal(market_data, **kw)
         if self.mode == 'llm' and self.agent:
             try:
                 return self.agent.get_signal(market_data)
             except Exception as e:
                 return {'action': 'WAIT', 'reason': str(e)}
         if self.mode == 'hybrid' and self.agent:
-            sig = generate_signal(market_data, min_confidence=self.min_conf)
+            sig = generate_signal(market_data, **kw)
             if sig['action'] == 'WAIT':
                 return sig
             try:
@@ -311,7 +334,7 @@ class BarReplayer:
             except Exception:
                 pass
             return sig
-        return generate_signal(market_data, min_confidence=self.min_conf)
+        return generate_signal(market_data, **kw)
 
     # also expose as static for tests
     @staticmethod
@@ -448,9 +471,8 @@ class BarReplayer:
             all_trades.extend(wt)
 
             if len(weq) > 1:
-                ratio = capital / self.initial if self.initial > 0 else 1.0
-                oos_equity.extend(e * ratio for e in weq[1:])
-                capital = weq[-1] * ratio
+                oos_equity.extend(weq[1:])
+                capital = weq[-1]
 
             start += test_len
             window_num += 1

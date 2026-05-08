@@ -40,7 +40,18 @@
       "Bash(python -m pytest tests/test_backtester.py -v)",
       "Bash(git commit *)",
       "Bash(python -m backtest.runner --symbol BTC/USDT --start 2024-01-01 --mode rules --capital 10000)",
-      "Bash(python -m backtest.runner --symbol BNB/USDT --start 2024-01-01 --mode rules --capital 10000)"
+      "Bash(python -m backtest.runner --symbol BNB/USDT --start 2024-01-01 --mode rules --capital 10000)",
+      "Bash(python -m pytest tests/test_smc.py -v)",
+      "Bash(python -m backtest.runner --symbol BTC/USDT --start 2024-01-01 --end 2026-05-08 --mode rules --capital 10000)",
+      "Bash(python -m backtest.runner --symbol ETH/USDT --start 2024-01-01 --end 2026-05-08 --mode rules --capital 10000)",
+      "Bash(python -m backtest.runner --symbol SOL/USDT --start 2024-01-01 --end 2026-05-08 --mode rules --capital 10000)",
+      "Bash(python -m backtest.runner --symbol BNB/USDT --start 2024-01-01 --end 2026-05-08 --mode rules --capital 10000)",
+      "Bash(python -m pytest tests/test_signal_logic.py -v)",
+      "Bash(python -m pytest tests/test_signal_logic.py tests/test_smc.py tests/test_backtester.py -v)",
+      "Bash(python -m pytest tests/ -v --tb=no -q)",
+      "Bash(python -m pytest tests/test_phase4.py -v)",
+      "Bash(python -m pytest tests/ -v --tb=short)",
+      "Bash(pip show *)"
     ]
   }
 }

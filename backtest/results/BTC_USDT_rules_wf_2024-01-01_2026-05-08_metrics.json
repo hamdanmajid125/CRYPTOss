@@ -1,0 +1,17 @@
+{
+  "total_return_pct": 0,
+  "cagr_pct": 0,
+  "sharpe": null,
+  "sortino": null,
+  "max_dd_pct": 0,
+  "max_dd_bars": 0,
+  "n_trades": 0,
+  "win_rate_pct": 0,
+  "avg_win_usdt": 0,
+  "avg_loss_usdt": 0,
+  "expectancy_usdt": 0,
+  "profit_factor": 0,
+  "best_trade_usdt": 0,
+  "worst_trade_usdt": 0,
+  "final_equity": 0
+}

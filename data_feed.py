@@ -496,6 +496,56 @@ class DataFeed:
         return result
 
     # ─────────────────────────────────────────────────────────────────────
+    # OPEN INTEREST  (Phase 4 — Binance perpetual, public endpoint)
+    # ─────────────────────────────────────────────────────────────────────
+    def get_open_interest(self, symbol: str) -> dict:
+        """
+        Fetches current open interest (in USDT) from Binance perp market.
+        compressed=True when OI dropped >5% vs the previous cached reading,
+        indicating forced deleveraging / leverage unwinding.
+        Cached 5 minutes per symbol.
+        """
+        now  = time.time()
+        base = symbol.replace('/USDT', '').replace('/BTC', '')
+        key  = f'oi_{base}'
+        cached = self._news_cache.get(key)
+        if cached and now - cached['ts'] < 300:
+            return cached['data']
+
+        result = {'oi_usdt': 0.0, 'change_pct': 0.0, 'compressed': False}
+        try:
+            perp = base + 'USDT'
+            r = requests.get(
+                'https://fapi.binance.com/fapi/v1/openInterest',
+                params={'symbol': perp},
+                timeout=5,
+            )
+            if r.ok:
+                oi_contracts = float(r.json().get('openInterest', 0))
+                pr = requests.get(
+                    'https://fapi.binance.com/fapi/v1/ticker/price',
+                    params={'symbol': perp},
+                    timeout=5,
+                )
+                price = float(pr.json().get('price', 0)) if pr.ok else 0.0
+                oi_usdt = round(oi_contracts * price, 0) if price > 0 else 0.0
+
+                prev_oi = cached['data']['oi_usdt'] if cached else oi_usdt
+                change_pct = ((oi_usdt - prev_oi) / prev_oi * 100) if prev_oi > 0 else 0.0
+                compressed = change_pct < -5.0
+
+                result = {
+                    'oi_usdt':    oi_usdt,
+                    'change_pct': round(change_pct, 2),
+                    'compressed': compressed,
+                }
+        except Exception:
+            pass
+
+        self._news_cache[key] = {'data': result, 'ts': now}
+        return result
+
+    # ─────────────────────────────────────────────────────────────────────
     # FEAR & GREED
     # ─────────────────────────────────────────────────────────────────────
     def get_fear_and_greed(self) -> dict:
@@ -580,6 +630,7 @@ class DataFeed:
         bos_choch      = self.detect_bos_choch(df)
         regime         = self.detect_regime(df)
         funding_rate   = self.get_funding_rate(symbol)
+        open_interest  = self.get_open_interest(symbol)
 
         return {
             'symbol':         symbol,
@@ -612,8 +663,10 @@ class DataFeed:
             'bos_choch':      bos_choch,
             'regime':         regime,
             'funding_rate':   funding_rate,
+            'open_interest':  open_interest,
             'candles':             df.tail(80)[['open', 'high', 'low', 'close', 'volume']].to_dict('records'),
             'adx':                 round(cur_adx, 2),
             'bb_width_percentile': bb_width_pct,
             'atr_percentile':      atr_pct,
+            'bar_hour_utc':        int(df.index[-1].hour),
         }

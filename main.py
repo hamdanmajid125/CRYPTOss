@@ -23,10 +23,37 @@ async def lifespan(__: FastAPI):
 
 from data_feed import DataFeed
 from claude_agent import ClaudeAgent
-from signal_logic import generate_signal as _rule_signal
+from signal_logic import generate_signal as _generate_signal
 from weex_client import WeexClient
 from risk_manager import RiskManager, RiskSettings
-from telegram_notifier import TelegramNotifier
+from whatsapp_notifier import WhatsAppNotifier
+from config import cfg
+from bot_logger import setup_logging, SignalLogger, get_logger
+
+setup_logging()
+_log        = get_logger('main')
+_sig_logger = SignalLogger(path=cfg.observability.signals_log)
+
+
+def _rule_signal(data: dict) -> dict:
+    """Thin wrapper that passes config-driven parameters to generate_signal."""
+    return _generate_signal(
+        data,
+        fee_pct              = cfg.signal.fee_pct,
+        min_rr               = cfg.signal.min_rr,
+        min_confidence       = cfg.signal.min_confidence,
+        sl_mult              = cfg.signal.sl_mult,
+        tp1_mult             = cfg.signal.tp1_mult,
+        tp2_mult             = cfg.signal.tp2_mult,
+        tp3_mult             = cfg.signal.tp3_mult,
+        adx_chop_threshold   = cfg.signal.adx_chop_threshold,
+        bb_pct_chop          = cfg.signal.bb_pct_chop,
+        ema200_hard_gate     = cfg.signal.ema200_hard_gate,
+        session_filter       = cfg.signal.session_filter,
+        session_start_utc    = cfg.signal.session_start_utc,
+        session_end_utc      = cfg.signal.session_end_utc,
+        confluence_required  = cfg.signal.confluence_required,
+    )
 from news_watcher import NewsWatcher
 from trade_journal import TradeJournal
 from pump_scanner import PumpScanner
@@ -56,18 +83,44 @@ public_exchange = ccxt.binance({'options': {'defaultType': 'spot'}, 'enableRateL
 
 feed   = DataFeed(public_exchange, cryptopanic_token=os.getenv('CRYPTOPANIC_TOKEN', ''))
 claude = ClaudeAgent(api_key=os.getenv('ANTHROPIC_API_KEY', ''))
-notifier = TelegramNotifier(
-    token   = os.getenv('TELEGRAM_BOT_TOKEN', ''),
-    chat_id = os.getenv('TELEGRAM_CHAT_ID', ''),
+notifier = WhatsAppNotifier(
+    phone   = os.getenv('WHATSAPP_PHONE', ''),
+    api_key = os.getenv('WHATSAPP_API_KEY', ''),
 )
-risk   = RiskManager(RiskSettings(
-    account_usdt    = 0.0,  # seeded from live WEEX balance in lifespan startup
-    risk_pct        = float(os.getenv('RISK_PCT', '1.5')),
-    max_trade_usdt  = float(os.getenv('MAX_TRADE_USDT', '75')),
-    min_confidence  = int(os.getenv('MIN_CONFIDENCE', '75')),
-    daily_loss_limit = float(os.getenv('DAILY_LOSS_LIMIT_USDT', '50')),
-    max_concurrent  = int(os.getenv('MAX_CONCURRENT_TRADES', '2')),
-))
+def _on_risk_alert(event: str, data: dict) -> None:
+    reason = data.get('reason', event)
+    if event == 'bot_paused':
+        notifier.bot_paused(reason, data.get('minutes', 0))
+    elif event == 'daily_loss_limit':
+        notifier._send(f'[RISK] Daily loss limit hit\n{reason}')
+    elif event == 'drawdown_halt':
+        notifier._send(f'[RISK] Drawdown halt triggered\n{reason}')
+    _log.warning('risk_alert', event=event, **{k: v for k, v in data.items() if k != 'reason'})
+
+
+risk   = RiskManager(
+    RiskSettings(
+        account_usdt     = 0.0,  # seeded from live WEEX balance in lifespan startup
+        risk_pct         = float(os.getenv('RISK_PCT',              str(cfg.risk.risk_pct))),
+        max_trade_usdt   = float(os.getenv('MAX_TRADE_USDT',        str(cfg.risk.max_trade_usdt))),
+        min_confidence   = int(os.getenv('MIN_CONFIDENCE',          str(cfg.risk.min_confidence))),
+        daily_loss_limit = float(os.getenv('DAILY_LOSS_LIMIT_USDT', str(cfg.risk.daily_loss_limit))),
+        max_concurrent   = int(os.getenv('MAX_CONCURRENT_TRADES',   str(cfg.risk.max_concurrent))),
+        atr_pct_threshold     = cfg.risk.atr_pct_threshold,
+        cooldown_close_sec    = cfg.risk.cooldown_close_sec,
+        cooldown_stop_sec     = cfg.risk.cooldown_stop_sec,
+        drawdown_halt_pct     = cfg.risk.drawdown_halt_pct,
+        drawdown_reduce_pct   = cfg.risk.drawdown_reduce_pct,
+        consec_3_pause_sec    = cfg.risk.consec_3_pause_sec,
+        consec_5_pause_sec    = cfg.risk.consec_5_pause_sec,
+        single_loss_pct       = cfg.risk.single_loss_pct,
+        single_loss_pause_sec = cfg.risk.single_loss_pause_sec,
+        tp1_atr_min           = cfg.risk.tp1_atr_min,
+        tp1_atr_max           = cfg.risk.tp1_atr_max,
+    ),
+    on_alert   = _on_risk_alert,
+    closes_log = cfg.observability.closes_log,
+)
 weex = WeexClient(
     api_key       = os.getenv('WEEX_API_KEY', ''),
     secret        = os.getenv('WEEX_SECRET', ''),
@@ -129,8 +182,9 @@ def _make_signal(data: dict) -> dict:
         'atr':            data.get('atr', rule_sig.get('atr', 0)),
     })
 
+    veto = None
     try:
-        veto = claude.veto_signal(rule_sig, data)
+        veto     = claude.veto_signal(rule_sig, data)
         decision = veto.get('decision', 'APPROVE')
         adj      = veto.get('confidence_adjustment', 0)
         rule_sig['veto_decision'] = decision
@@ -139,6 +193,7 @@ def _make_signal(data: dict) -> dict:
         if decision == 'REJECT':
             rule_sig['action'] = 'WAIT'
             rule_sig['reason'] = 'LLM veto: ' + veto.get('reason', '')
+            _sig_logger.log_decision(symbol, data, rule_sig, veto=veto, final_sig=rule_sig)
             return rule_sig
 
         rule_sig['confidence'] = max(0, min(100, rule_sig['confidence'] + adj))
@@ -148,8 +203,9 @@ def _make_signal(data: dict) -> dict:
                 f'Post-veto confidence {rule_sig["confidence"]} '
                 f'< {risk.settings.min_confidence}')
     except Exception as e:
-        print(f'[Veto] Error for {symbol}: {e} — proceeding with rule signal')
+        _log.error('veto_error', symbol=symbol, error=str(e))
 
+    _sig_logger.log_decision(symbol, data, rule_sig, veto=veto, final_sig=rule_sig)
     return rule_sig
 
 
@@ -409,7 +465,9 @@ async def get_top_coins():
 
 @app.get('/stats')
 async def get_stats():
-    return risk.get_stats()
+    stats   = risk.get_stats()
+    rolling = risk.rolling_metrics(days=cfg.observability.rolling_window_days)
+    return {**stats, 'rolling_30d': rolling}
 
 @app.get('/balance')
 async def get_balance():

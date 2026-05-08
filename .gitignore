@@ -1,1 +1,11 @@
 .env
+*.log
+*.jsonl
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+backtest/data/
+backtest/results/*.csv
+backtest/results/*.png
+risk_state.json
