@@ -23,6 +23,7 @@ async def lifespan(__: FastAPI):
 
 from data_feed import DataFeed
 from claude_agent import ClaudeAgent
+from signal_logic import generate_signal as _rule_signal
 from weex_client import WeexClient
 from risk_manager import RiskManager, RiskSettings
 from telegram_notifier import TelegramNotifier
@@ -99,6 +100,59 @@ def log_trade(line: str):
         f.write(f'{ts} | {line}\n')
 
 
+def _make_signal(data: dict) -> dict:
+    """
+    Phase 3 flow: rules generate, LLM vetoes.
+
+    1. generate_signal() applies all hard gates (MTF, R:R, volume, regime, confidence).
+    2. If not WAIT, call claude.veto_signal() to APPROVE / REJECT / DOWNGRADE.
+    3. Return the final signal (always includes 'action' and 'symbol').
+    """
+    rule_sig = _rule_signal(data)
+    symbol   = data.get('symbol', '')
+    rule_sig.setdefault('symbol', symbol)
+
+    if rule_sig['action'] == 'WAIT':
+        return rule_sig
+
+    # Enrich with live-context fields the dashboard expects
+    rule_sig.update({
+        'symbol':         symbol,
+        'price':          data.get('price', rule_sig.get('entry', 0)),
+        'timestamp':      data.get('timestamp', ''),
+        'pre_score':      rule_sig['confidence'],
+        'timeframe_bias': data.get('timeframe_bias', {}).get('overall', 'MIXED'),
+        'volume_signal':  data.get('volume_signal', 'NORMAL'),
+        'candle_pattern': data.get('candle_pattern', ''),
+        'sentiment':      data.get('fear_greed', {}).get('label', 'Neutral'),
+        'session':        claude._trading_session(),
+        'atr':            data.get('atr', rule_sig.get('atr', 0)),
+    })
+
+    try:
+        veto = claude.veto_signal(rule_sig, data)
+        decision = veto.get('decision', 'APPROVE')
+        adj      = veto.get('confidence_adjustment', 0)
+        rule_sig['veto_decision'] = decision
+        rule_sig['veto_reason']   = veto.get('reason', '')
+
+        if decision == 'REJECT':
+            rule_sig['action'] = 'WAIT'
+            rule_sig['reason'] = 'LLM veto: ' + veto.get('reason', '')
+            return rule_sig
+
+        rule_sig['confidence'] = max(0, min(100, rule_sig['confidence'] + adj))
+        if rule_sig['confidence'] < risk.settings.min_confidence:
+            rule_sig['action'] = 'WAIT'
+            rule_sig['reason'] = (
+                f'Post-veto confidence {rule_sig["confidence"]} '
+                f'< {risk.settings.min_confidence}')
+    except Exception as e:
+        print(f'[Veto] Error for {symbol}: {e} — proceeding with rule signal')
+
+    return rule_sig
+
+
 async def sync_balance_to_risk():
     """Fetch live USDT available from Weex and sync it to the risk manager."""
     try:
@@ -140,105 +194,89 @@ async def bg_auto_scanner():
             if pump_coins:
                 print(f'[PumpScanner] Prioritising {len(pump_coins)}: {pump_coins[:5]}')
 
-            print(f'[AutoScanner] Phase 1 — data collection for {len(top_coins)} coins (no Claude)')
+            print(f'[AutoScanner] Phase 1 — rule-based filter for {len(top_coins)} coins')
             await broadcast({
                 'type': 'scan_start', 'coins': top_coins, 'count': len(top_coins),
-                'message': f'Phase 1: collecting data for {len(top_coins)} coins (no AI yet)...',
+                'message': f'Phase 1: rule filter for {len(top_coins)} coins...',
             })
 
-            # ── Phase 1: data collection + pre-scoring — ZERO Claude calls ──
+            # ── Phase 1: rule-based filter — ZERO Claude calls ──────────────
             candidates: List[Dict] = []
             for symbol in top_coins:
                 try:
-                    data       = feed.get_full_analysis(symbol, '1h')
-                    tf_overall = data.get('timeframe_bias', {}).get('overall', 'MIXED')
-                    vol_signal = data.get('volume_signal', 'NORMAL')
+                    data      = feed.get_full_analysis(symbol, '1h')
+                    rule_sig  = _rule_signal(data)
 
-                    if tf_overall == 'MIXED':
+                    if rule_sig['action'] == 'WAIT':
                         await broadcast({'type': 'scan_skip', 'symbol': symbol,
-                                         'reason': 'Mixed TF bias'})
-                        await asyncio.sleep(0.3)
-                        continue
-                    if 'VERY LOW' in vol_signal:
-                        await broadcast({'type': 'scan_skip', 'symbol': symbol,
-                                         'reason': 'Very low volume'})
-                        await asyncio.sleep(0.3)
-                        continue
-
-                    pre_score = claude._score_confidence(
-                        data, data['timeframe_bias'], data['fear_greed'])
-                    data['pre_score'] = pre_score
-
-                    if pre_score < PRE_SCORE_THRESHOLD:
-                        await broadcast({'type': 'scan_skip', 'symbol': symbol,
-                                         'reason': f'Low pre-score ({pre_score}/100)'})
+                                         'reason': rule_sig.get('reason', 'Rule gate')})
                         await asyncio.sleep(0.2)
                         continue
 
-                    candidates.append(data)
+                    candidates.append((rule_sig, data))
                     await broadcast({'type': 'scan_candidate', 'symbol': symbol,
-                                     'pre_score': pre_score})
-                    print(f'[AutoScanner] {symbol} — candidate (pre-score={pre_score})')
-                    await asyncio.sleep(0.5)
+                                     'pre_score': rule_sig['confidence']})
+                    print(f'[AutoScanner] {symbol} — candidate '
+                          f'(conf={rule_sig["confidence"]}, {rule_sig["action"]})')
+                    await asyncio.sleep(0.3)
 
                 except Exception as e:
                     print(f'[AutoScanner] Data error {symbol}: {e}')
                     await asyncio.sleep(0.3)
 
-            # Sort by pre-score, limit to BATCH_SIZE
-            candidates.sort(key=lambda x: x.get('pre_score', 0), reverse=True)
+            # Sort by confidence, limit to BATCH_SIZE for veto phase
+            candidates.sort(key=lambda x: x[0].get('confidence', 0), reverse=True)
             batch = candidates[:BATCH_SIZE]
 
-            # ── Phase 2: ONE Claude batch call ───────────────────────────────
+            # ── Phase 2: LLM veto — one call per candidate ───────────────────
             signals_found: List[Dict] = []
 
             if batch:
-                syms = [d['symbol'] for d in batch]
-                print(f'[AutoScanner] Phase 2 — 1 Claude call for {len(batch)} candidates: {syms}')
+                syms = [d['symbol'] for _, d in batch]
+                print(f'[AutoScanner] Phase 2 — LLM veto for {len(batch)} candidates: {syms}')
                 await broadcast({
                     'type': 'scan_status',
-                    'message': (f'Phase 2: 1 Claude call for top {len(batch)} setups '
+                    'message': (f'Phase 2: LLM veto for {len(batch)} rule-approved setups '
                                 f'({len(top_coins)-len(batch)} pre-filtered)...'),
                     'candidates': syms,
                 })
 
-                signals = claude.get_batch_signals(batch)
-
-                for signal in signals:
-                    sym    = signal.get('symbol', '')
+                for rule_sig, data in batch:
+                    signal = _make_signal(data)
+                    sym    = signal.get('symbol', data.get('symbol', ''))
                     action = signal.get('action', 'WAIT')
                     conf   = signal.get('confidence', 0)
 
                     await broadcast({'type': 'signal', 'symbol': sym, 'signal': signal})
 
                     if action in ('LONG', 'SHORT'):
-                        log_trade(f"SIGNAL | {action} | {sym} | conf:{conf}% | {signal.get('setup_type','')}")
+                        log_trade(f"SIGNAL | {action} | {sym} | conf:{conf}% | "
+                                  f"{signal.get('setup_type','')} | "
+                                  f"veto:{signal.get('veto_decision','APPROVE')}")
                         signals_found.append(signal)
                         notifier.send_signal(signal)
                         if AUTO_TRADE:
                             await maybe_execute(signal)
                     else:
-                        wait_reason = signal.get('reason', '')
-                        if wait_reason.startswith('TP1_REJECT'):
-                            log_trade(f"TP1_REJECT | {sym} | conf:{conf}% | {wait_reason[:150]}")
-                        print(f'[AutoScanner] {sym} — WAIT (conf:{conf}%)')
+                        print(f'[AutoScanner] {sym} — WAIT after veto '
+                              f'(conf:{conf}%, {signal.get("veto_decision","")}: '
+                              f'{signal.get("veto_reason","")})')
 
             else:
-                print('[AutoScanner] No candidates passed pre-filter — Claude skipped entirely')
+                print('[AutoScanner] No candidates passed rule filter — LLM skipped entirely')
 
-            saved_calls = max(0, len(batch) - 1)
             await broadcast({
                 'type':          'scan_complete',
                 'total_scanned': len(top_coins),
                 'candidates':    len(batch),
                 'signals_found': len(signals_found),
                 'next_scan_in':  SCAN_INTERVAL,
-                'message': (f'Done — {len(top_coins)} scanned → {len(batch)} to Claude '
-                            f'(1 call, saved {saved_calls}) → {len(signals_found)} signal(s). '
+                'message': (f'Done — {len(top_coins)} scanned → {len(batch)} rule-approved '
+                            f'→ {len(signals_found)} signal(s) after LLM veto. '
                             f'Next in {SCAN_INTERVAL//60}min.'),
             })
             notifier.send_scan_summary(len(top_coins), len(signals_found), SCAN_INTERVAL)
-            print(f'[AutoScanner] Done. 1 Claude call, {len(signals_found)} signals. '
+            print(f'[AutoScanner] Done. {len(batch)} LLM calls, {len(signals_found)} signals. '
                   f'Sleeping {SCAN_INTERVAL}s...')
 
         except Exception as e:
@@ -400,55 +438,43 @@ async def scan_now(background_tasks: BackgroundTasks):
         candidates: List[Dict] = []
         for symbol in top_coins:
             try:
-                data       = feed.get_full_analysis(symbol, '1h')
-                tf_overall = data.get('timeframe_bias', {}).get('overall', 'MIXED')
-                vol_signal = data.get('volume_signal', 'NORMAL')
-                if tf_overall == 'MIXED' or 'VERY LOW' in vol_signal:
+                data     = feed.get_full_analysis(symbol, '1h')
+                rule_sig = _rule_signal(data)
+                if rule_sig['action'] == 'WAIT':
                     await broadcast({'type': 'scan_skip', 'symbol': symbol,
-                                     'reason': 'Mixed TF or very low volume'})
-                    await asyncio.sleep(0.3)
-                    continue
-                pre_score = claude._score_confidence(data, data['timeframe_bias'], data['fear_greed'])
-                data['pre_score'] = pre_score
-                if pre_score < PRE_SCORE_THRESHOLD:
-                    await broadcast({'type': 'scan_skip', 'symbol': symbol,
-                                     'reason': f'Low pre-score ({pre_score}/100)'})
+                                     'reason': rule_sig.get('reason', 'Rule gate')})
                     await asyncio.sleep(0.2)
                     continue
-                candidates.append(data)
-                await broadcast({'type': 'scan_candidate', 'symbol': symbol, 'pre_score': pre_score})
-                await asyncio.sleep(0.4)
+                candidates.append((rule_sig, data))
+                await broadcast({'type': 'scan_candidate', 'symbol': symbol,
+                                 'pre_score': rule_sig['confidence']})
+                await asyncio.sleep(0.3)
             except Exception as e:
                 print(f'[ManualScan] {symbol}: {e}')
 
-        candidates.sort(key=lambda x: x.get('pre_score', 0), reverse=True)
+        candidates.sort(key=lambda x: x[0].get('confidence', 0), reverse=True)
         batch = candidates[:BATCH_SIZE]
         signals_found: List[Dict] = []
 
         if batch:
             await broadcast({'type': 'scan_status',
-                             'message': f'Phase 2: 1 Claude call for top {len(batch)} setups...',
-                             'candidates': [d['symbol'] for d in batch]})
-            signals = claude.get_batch_signals(batch)
-            for signal in signals:
-                sym    = signal.get('symbol', '')
+                             'message': f'Phase 2: LLM veto for {len(batch)} rule-approved setups...',
+                             'candidates': [d['symbol'] for _, d in batch]})
+            for rule_sig, data in batch:
+                signal = _make_signal(data)
+                sym    = signal.get('symbol', data.get('symbol', ''))
                 action = signal.get('action', 'WAIT')
-                conf   = signal.get('confidence', 0)
                 await broadcast({'type': 'signal', 'symbol': sym, 'signal': signal})
                 if action in ('LONG', 'SHORT'):
                     signals_found.append(signal)
                     notifier.send_signal(signal)
                     if AUTO_TRADE:
                         await maybe_execute(signal)
-                else:
-                    wait_reason = signal.get('reason', '')
-                    if wait_reason.startswith('TP1_REJECT'):
-                        log_trade(f"TP1_REJECT | {sym} | conf:{conf}% | {wait_reason[:150]}")
 
         await broadcast({'type': 'scan_complete', 'total_scanned': len(top_coins),
                          'candidates': len(batch), 'signals_found': len(signals_found),
                          'next_scan_in': SCAN_INTERVAL,
-                         'message': f'Manual scan done — {len(batch)} to Claude → {len(signals_found)} signal(s).'})
+                         'message': f'Manual scan done — {len(batch)} rule-approved → {len(signals_found)} signal(s) after LLM veto.'})
     background_tasks.add_task(_run)
     return {'status': 'scan_started', 'coins': TOP_N_COINS, 'batch_size': BATCH_SIZE}
 
@@ -459,19 +485,16 @@ async def analyze_manual(symbol: str, background_tasks: BackgroundTasks):
     try:
         ex_symbol = symbol.replace('-', '/').upper()
         data      = feed.get_full_analysis(ex_symbol, '1h')
-        signal    = claude.get_signal(data)
-        if signal:
-            background_tasks.add_task(broadcast, {'type': 'signal', 'symbol': ex_symbol, 'signal': signal})
-            action      = signal.get('action', 'WAIT')
-            conf        = signal.get('confidence', 0)
-            wait_reason = signal.get('reason', '')
-            if action in ('LONG', 'SHORT'):
-                log_trade(f"SIGNAL | {action} | {ex_symbol} | conf:{conf}% | {signal.get('setup_type','')}")
-            elif wait_reason.startswith('TP1_REJECT'):
-                log_trade(f"TP1_REJECT | {ex_symbol} | conf:{conf}% | {wait_reason[:150]}")
-            if AUTO_TRADE and action in ('LONG', 'SHORT'):
+        signal    = _make_signal(data)
+        background_tasks.add_task(broadcast, {'type': 'signal', 'symbol': ex_symbol, 'signal': signal})
+        action = signal.get('action', 'WAIT')
+        conf   = signal.get('confidence', 0)
+        if action in ('LONG', 'SHORT'):
+            log_trade(f"SIGNAL | {action} | {ex_symbol} | conf:{conf}% | "
+                      f"{signal.get('setup_type','')} | veto:{signal.get('veto_decision','APPROVE')}")
+            if AUTO_TRADE:
                 background_tasks.add_task(maybe_execute, signal)
-        return signal or {'action': 'WAIT', 'reason': 'Analysis returned no signal'}
+        return signal
     except Exception as e:
         return JSONResponse({'error': str(e)}, status_code=500)
 

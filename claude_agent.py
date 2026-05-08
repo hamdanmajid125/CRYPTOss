@@ -9,7 +9,7 @@ class ClaudeAgent:
     def __init__(self, api_key: str):
         self.client = anthropic.Anthropic(api_key=api_key)
         self.model_fast = 'claude-sonnet-4-6'
-        self.model_deep = 'claude-opus-4-5-20251101'
+        self.model_deep = 'claude-opus-4-7'
 
     def _trading_session(self) -> str:
         hour = datetime.datetime.now(datetime.timezone.utc).hour
@@ -125,6 +125,152 @@ class ClaudeAgent:
         elif overall == 'BEARISH' and macd > macd_sig: score -= 8
 
         return max(0, min(100, score))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # PHASE 3: LLM VETO  — approve / reject / downgrade a rule-generated signal
+    # ─────────────────────────────────────────────────────────────────────────
+
+    _VETO_TOOL = {
+        'name': 'submit_veto',
+        'description': 'Submit your veto decision on the proposed trade signal.',
+        'input_schema': {
+            'type': 'object',
+            'properties': {
+                'decision': {
+                    'type': 'string',
+                    'enum': ['APPROVE', 'REJECT', 'DOWNGRADE'],
+                    'description': (
+                        'APPROVE — signal is valid, proceed. '
+                        'REJECT — block the trade (clear objective reason required). '
+                        'DOWNGRADE — reduce confidence by confidence_adjustment.'
+                    ),
+                },
+                'confidence_adjustment': {
+                    'type': 'integer',
+                    'minimum': -20,
+                    'maximum': 10,
+                    'description': (
+                        'Points to add to rule confidence (-20 to +10). '
+                        'Must be 0 for APPROVE. Must be negative for DOWNGRADE.'
+                    ),
+                },
+                'reason': {
+                    'type': 'string',
+                    'description': 'One concise sentence explaining the decision.',
+                },
+            },
+            'required': ['decision', 'confidence_adjustment', 'reason'],
+        },
+    }
+
+    def veto_signal(
+        self,
+        rule_signal: dict,
+        market_data: dict,
+        position_usdt: float = 0.0,
+    ) -> dict:
+        """
+        Ask Claude to APPROVE, REJECT, or DOWNGRADE a rule-generated signal.
+
+        Uses tool_use with a strict schema so the response is always valid JSON —
+        no string parsing required.
+
+        Returns {'decision': str, 'confidence_adjustment': int, 'reason': str}.
+        On any error, returns APPROVE with adjustment 0 (fail-safe: don't block trades
+        due to API failures).
+        """
+        action  = rule_signal.get('action', 'WAIT')
+        entry   = rule_signal.get('entry', 0)
+        sl      = rule_signal.get('sl', 0)
+        tp1     = rule_signal.get('tp1', 0)
+        tp2     = rule_signal.get('tp2', 0)
+        tp3     = rule_signal.get('tp3', 0)
+        conf    = rule_signal.get('confidence', 0)
+        rr      = rule_signal.get('rr', '?')
+        setup   = rule_signal.get('setup_type', '')
+        atr     = market_data.get('atr', 0)
+        price   = market_data.get('price', entry)
+        rsi     = market_data.get('rsi', 50)
+        macd    = market_data.get('macd', 0)
+        macd_s  = market_data.get('macd_sig', 0)
+        vol     = market_data.get('volume_signal', 'NORMAL')
+        rsi_div = market_data.get('rsi_divergence', 'NONE')
+        tf_bias = market_data.get('timeframe_bias', {})
+        overall = tf_bias.get('overall', 'MIXED')
+        agree   = tf_bias.get('agreement', 0)
+        fng     = market_data.get('fear_greed', {'value': 50, 'label': 'Neutral'})
+        ema200  = market_data.get('ema200')
+        fvgs    = market_data.get('fvgs', [])
+        obs     = market_data.get('order_blocks', [])
+
+        risk_pct = abs(entry - sl) / entry * 100 if entry else 0
+
+        ema200_pos = ('N/A' if ema200 is None else
+                      'ABOVE' if price > ema200 else 'BELOW')
+
+        near_fvg = any(
+            f['bot'] <= price <= f['top'] for f in fvgs
+            if f.get('type', '').startswith(action.lower()[:4])
+        )
+        near_ob = any(
+            o.get('bot', 0) <= price <= o.get('top', 0) for o in obs
+            if o.get('type', '').startswith(action.lower()[:4])
+        )
+
+        prompt = (
+            f'You are a senior risk manager reviewing a rule-generated crypto trade signal.\n'
+            f'The rule engine already enforced: MTF agreement >= 2/3, R:R >= 2.0 after fees, '
+            f'no VERY LOW volume, ADX/BB regime filter, confidence >= 65.\n'
+            f'Your job: APPROVE unless you see a CLEAR objective reason to reject or downgrade.\n'
+            f'Do NOT re-analyze from scratch. Trust the rule engine on entries/SL/TP.\n\n'
+            f'SIGNAL\n'
+            f'  Action    : {action}\n'
+            f'  Entry     : {entry}  SL: {sl}  (risk {risk_pct:.1f}%)\n'
+            f'  TP1: {tp1}  TP2: {tp2}  TP3: {tp3}  R:R: {rr}\n'
+            f'  Confidence: {conf}/100  Setup: {setup}\n\n'
+            f'MARKET CONTEXT\n'
+            f'  Symbol  : {market_data.get("symbol", "")}  Price: {price}  ATR: {atr:.4f}\n'
+            f'  MTF bias: {overall} {agree}/3\n'
+            f'  RSI     : {rsi:.1f}  RSI Div: {rsi_div}\n'
+            f'  MACD    : {"BULL" if macd > macd_s else "BEAR"} ({macd:.4f} vs {macd_s:.4f})\n'
+            f'  Volume  : {vol}\n'
+            f'  EMA200  : {ema200_pos}\n'
+            f'  F&G     : {fng.get("value", 50)}/100 {fng.get("label", "")}\n'
+            f'  Near aligned FVG: {near_fvg}  Near aligned OB: {near_ob}\n\n'
+            f'GROUNDS FOR REJECT (use sparingly):\n'
+            f'  - RSI > 82 and LONG, or RSI < 18 and SHORT (extreme overextension)\n'
+            f'  - Strong opposing RSI divergence directly contradicting the signal\n'
+            f'  - Funding rate extreme + wrong side (add context if known)\n\n'
+            f'GROUNDS FOR DOWNGRADE (-5 to -20):\n'
+            f'  - RSI 75-82 for LONG or 18-25 for SHORT (moderately extended)\n'
+            f'  - MACD opposing the signal direction\n'
+            f'  - No aligned FVG or OB near entry\n\n'
+            f'GROUNDS FOR APPROVE (+0 to +10):\n'
+            f'  - RSI in 40-60 range, MACD aligned, near OB/FVG\n'
+            f'  - Extreme F&G contrarian boost (Fear < 20 + LONG, Greed > 80 + SHORT)\n'
+        )
+
+        # Use deep model for high confidence or large position
+        model = (self.model_deep
+                 if (conf >= 80 or position_usdt >= 500)
+                 else self.model_fast)
+
+        try:
+            resp = self.client.messages.create(
+                model=model,
+                max_tokens=256,
+                tools=[self._VETO_TOOL],
+                tool_choice={'type': 'tool', 'name': 'submit_veto'},
+                messages=[{'role': 'user', 'content': prompt}],
+            )
+            for block in resp.content:
+                if block.type == 'tool_use' and block.name == 'submit_veto':
+                    return block.input
+        except Exception as e:
+            print(f'[Veto] API error: {e} — defaulting to APPROVE')
+
+        return {'decision': 'APPROVE', 'confidence_adjustment': 0,
+                'reason': 'Veto call failed — defaulting to approve'}
 
     # ─────────────────────────────────────────────────────────────────────────
     # THE BEST TRADING PROMPT  (completely rewritten)
@@ -409,9 +555,8 @@ Respond ONLY with this exact JSON (no markdown, no preamble, no explanation):
 
     def get_batch_signals(self, data_list: list) -> list:
         """
-        Analyze multiple pre-filtered coins in ONE Claude call.
-        Replaces N individual get_signal() calls — massive token saving.
-        Returns a list of signal dicts (one per input coin).
+        DEPRECATED (Phase 3): use signal_logic.generate_signal + veto_signal instead.
+        Kept for backward-compat with /webhook/tradingview and legacy callers.
         """
         if not data_list:
             return []
@@ -529,7 +674,8 @@ ONLY JSON array, no markdown, no extra text:
             return skipped
 
     # ─────────────────────────────────────────────────────────────────────────
-    # GET SIGNAL  (kept for manual analyze / webhook — single-coin deep analysis)
+    # GET SIGNAL  — DEPRECATED (Phase 3). Use generate_signal + veto_signal.
+    # Kept for /analyze and /webhook endpoints.
     # ─────────────────────────────────────────────────────────────────────────
     def get_signal(self, market_data: dict, deep: bool = False) -> Optional[Dict]:
         try:

@@ -1,0 +1,17 @@
+{
+  "total_return_pct": -0.14,
+  "cagr_pct": -0.06,
+  "sharpe": 0.005,
+  "sortino": 0.058,
+  "max_dd_pct": -11.17,
+  "max_dd_bars": 11362,
+  "n_trades": 106,
+  "win_rate_pct": 47.2,
+  "avg_win_usdt": 119.7,
+  "avg_loss_usdt": -107.13,
+  "expectancy_usdt": -0.13,
+  "profit_factor": 0.998,
+  "best_trade_usdt": 221.72,
+  "worst_trade_usdt": -113.03,
+  "final_equity": 9985.86
+}
