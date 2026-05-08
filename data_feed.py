@@ -1,10 +1,10 @@
 import ccxt
 import pandas as pd
-import pandas_ta_classic as ta
 import requests
 import time
 import xml.etree.ElementTree as ET
 from utils import with_retry
+from indicators import compute_indicators
 
 class DataFeed:
 
@@ -85,36 +85,7 @@ class DataFeed:
         return df
 
     def add_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
-        df['ema20']  = ta.ema(df['close'], length=20)
-        df['ema50']  = ta.ema(df['close'], length=50)
-        ema200       = ta.ema(df['close'], length=200)
-        df['ema200'] = ema200 if ema200 is not None else float('nan')
-        df['rsi']    = ta.rsi(df['close'], length=14)
-        df['atr']    = ta.atr(df['high'], df['low'], df['close'], length=14)
-
-        macd = ta.macd(df['close'])
-        df['macd']     = macd['MACD_12_26_9']
-        df['macd_sig'] = macd['MACDs_12_26_9']
-
-        bb = ta.bbands(df['close'])
-        bb_upper_col = [c for c in bb.columns if c.startswith('BBU')][0]
-        bb_lower_col = [c for c in bb.columns if c.startswith('BBL')][0]
-        df['bb_upper'] = bb[bb_upper_col]
-        df['bb_lower'] = bb[bb_lower_col]
-
-        df['volume_sma'] = ta.sma(df['volume'], length=20)
-
-        adx_df = ta.adx(df['high'], df['low'], df['close'], length=14)
-        if adx_df is not None:
-            adx_col = [c for c in adx_df.columns if c.startswith('ADX')][0]
-            df['adx'] = adx_df[adx_col]
-        else:
-            df['adx'] = float('nan')
-
-        bb_mid_col = [c for c in bb.columns if c.startswith('BBM')][0]
-        df['bb_mid'] = bb[bb_mid_col]
-
-        return df
+        return compute_indicators(df)
 
     # ─────────────────────────────────────────────────────────────────────
     # CANDLESTICK PATTERN DETECTION  (NEW)
