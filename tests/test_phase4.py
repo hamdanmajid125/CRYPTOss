@@ -5,7 +5,7 @@ import sys, os, time
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import pytest
-from signal_logic import score_confidence, generate_signal
+from signal_logic import score_confidence
 from risk_manager import RiskManager, RiskSettings
 
 
@@ -96,12 +96,14 @@ def test_oi_not_compressed_no_change():
 
 # ── 4.3: Per-symbol cooldown ───────────────────────────────────────────────────
 
-_STATE_FILE = 'test_risk_phase4.json'
+_STATE_FILE  = 'test_risk_phase4.json'
+_CLOSES_FILE = 'test_closes_phase4.jsonl'
 
 def _make_risk():
     if os.path.exists(_STATE_FILE):
         os.remove(_STATE_FILE)
-    return RiskManager(RiskSettings(account_usdt=10000.0), state_file=_STATE_FILE)
+    return RiskManager(RiskSettings(account_usdt=10000.0),
+                       state_file=_STATE_FILE, closes_log=_CLOSES_FILE)
 
 def _signal(symbol='BTC/USDT', action='LONG', confidence=80, atr=50.0, entry=30000.0):
     sl = entry - 1.5 * atr
@@ -177,7 +179,7 @@ def test_atr_normalization_reduces_size_for_volatile_asset():
     """ATR > 2.5% of entry → risk_usdt scaled down."""
     rm = RiskSettings(account_usdt=10000.0, risk_pct=1.0)
     if os.path.exists(_STATE_FILE): os.remove(_STATE_FILE)
-    mgr = RiskManager(rm, state_file=_STATE_FILE)
+    mgr = RiskManager(rm, state_file=_STATE_FILE, closes_log=_CLOSES_FILE)
 
     entry = 100.0
     sl    = 85.0   # 15% sl distance
@@ -193,7 +195,7 @@ def test_atr_normalization_reduces_size_for_volatile_asset():
 def test_atr_normalization_no_change_below_threshold():
     """ATR <= 2.5% of entry → no scaling."""
     if os.path.exists(_STATE_FILE): os.remove(_STATE_FILE)
-    mgr = RiskManager(RiskSettings(account_usdt=10000.0), state_file=_STATE_FILE)
+    mgr = RiskManager(RiskSettings(account_usdt=10000.0), state_file=_STATE_FILE, closes_log=_CLOSES_FILE)
     entry = 100.0
     sl    = 98.0
     atr   = 2.0  # 2% of entry — below threshold
@@ -208,6 +210,6 @@ def test_atr_normalization_no_change_below_threshold():
 def test_atr_normalization_exact_threshold():
     """ATR exactly at 2.5% → no scaling (not strictly above threshold)."""
     if os.path.exists(_STATE_FILE): os.remove(_STATE_FILE)
-    mgr = RiskManager(RiskSettings(account_usdt=10000.0), state_file=_STATE_FILE)
+    mgr = RiskManager(RiskSettings(account_usdt=10000.0), state_file=_STATE_FILE, closes_log=_CLOSES_FILE)
     result = mgr.position_size(100.0, 97.0, confidence=70, atr=2.5)
     assert result['atr_scale'] == pytest.approx(1.0)

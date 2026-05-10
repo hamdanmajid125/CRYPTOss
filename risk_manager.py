@@ -494,11 +494,14 @@ class RiskManager:
             'avg_loss':    round(sum(losses) / len(losses), 2) if losses else 0.0,
         }
 
-        # Auto-pause if expectancy is sufficiently negative
+        # Auto-pause if expectancy is sufficiently negative — only trigger once per pause window
         from config import cfg
-        if expectancy < cfg.observability.expectancy_pause_threshold and n >= 10:
+        if (expectancy < cfg.observability.expectancy_pause_threshold
+                and n >= 10
+                and not self.is_paused()):
             pause_sec = self.settings.consec_3_pause_sec
-            self.pause_until = max(self.pause_until, time.time() + pause_sec)
+            self.pause_until = time.time() + pause_sec
+            self._save_state()
             reason = f'30-day expectancy ${expectancy:.2f} < threshold — auto-paused'
             self._fire_alert('bot_paused', {'reason': reason, 'minutes': pause_sec // 60})
             print(f'[Risk] {reason}')

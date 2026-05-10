@@ -5,6 +5,8 @@ import os
 import time
 from typing import Callable, Dict, List
 
+import desktop_notifier as desk
+
 _STATE_FILE = 'open_trades.json'
 _LOG_FILE   = 'trades.log'
 _MAX_HOURS  = float(os.getenv('MAX_HOURS_IN_TRADE', '8'))
@@ -146,6 +148,7 @@ class TradeManager:
                                 'reason': 'SL_HIT', 'pnl': round(pnl, 2)})
             if self.notifier:
                 self.notifier.trade_closed(sym, side, pnl, 'SL_HIT')
+            desk.notify_trade_closed(sym, side, pnl, 'SL_HIT')
             return True
 
         # ── Stage 1: time-stop, invalidation, TP1 ──────────────────────────
@@ -160,6 +163,7 @@ class TradeManager:
                                     'reason': 'TIME_STOP', 'pnl': round(pnl, 2)})
                 if self.notifier:
                     self.notifier.trade_closed(sym, side, pnl, 'TIME_STOP')
+                desk.notify_trade_closed(sym, side, pnl, 'TIME_STOP')
                 return True
 
             if invalidation:
@@ -173,6 +177,7 @@ class TradeManager:
                                         'reason': 'INVALIDATION', 'pnl': round(pnl, 2)})
                     if self.notifier:
                         self.notifier.trade_closed(sym, side, pnl, 'INVALIDATION')
+                    desk.notify_trade_closed(sym, side, pnl, 'INVALIDATION')
                     return True
 
             tp1_hit = (cur >= tp1) if is_long else (cur <= tp1)
@@ -192,6 +197,7 @@ class TradeManager:
                                     'pnl': round(pnl, 2), 'new_sl': be_sl})
                 if self.notifier:
                     self.notifier.trade_closed(sym, side, pnl, 'TP1_HIT')
+                desk.notify_trade_closed(sym, side, pnl, 'TP1_HIT')
 
         # ── Stage 2: TP2 ────────────────────────────────────────────────────
         elif stage == 2:
@@ -211,6 +217,7 @@ class TradeManager:
                                     'pnl': round(pnl, 2), 'new_sl': tp1})
                 if self.notifier:
                     self.notifier.trade_closed(sym, side, pnl, 'TP2_HIT')
+                desk.notify_trade_closed(sym, side, pnl, 'TP2_HIT')
 
         # ── Stage 3: runner — TP3 or trail SL ───────────────────────────────
         elif stage == 3:
@@ -223,6 +230,7 @@ class TradeManager:
                 await broadcast_fn({'type': 'tp3_hit', 'symbol': sym, 'pnl': round(pnl, 2)})
                 if self.notifier:
                     self.notifier.trade_closed(sym, side, pnl, 'TP3_HIT')
+                desk.notify_trade_closed(sym, side, pnl, 'TP3_HIT')
                 return True
 
             if atr > 0:

@@ -27,6 +27,7 @@ from signal_logic import generate_signal as _generate_signal
 from weex_client import WeexClient
 from risk_manager import RiskManager, RiskSettings
 from whatsapp_notifier import WhatsAppNotifier
+import desktop_notifier as desk
 from config import cfg
 from bot_logger import setup_logging, SignalLogger, get_logger
 
@@ -92,7 +93,17 @@ def _on_risk_alert(event: str, data: dict) -> None:
         notifier._send(f'[RISK] Daily loss limit hit\n{reason}')
     elif event == 'drawdown_halt':
         notifier._send(f'[RISK] Drawdown halt triggered\n{reason}')
-    _log.warning('risk_alert', event=event, **{k: v for k, v in data.items() if k != 'reason'})
+    desk.notify_risk_alert(event, reason, data.get('minutes', 0))
+    _log.warning('risk_alert', alert_type=event, **{k: v for k, v in data.items() if k != 'reason'})
+    # Push to dashboard WebSocket clients
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            loop.create_task(broadcast({'type': 'risk_alert', 'event': event,
+                                        'reason': reason, **{k: v for k, v in data.items()
+                                                             if k not in ('reason',)}}))
+    except Exception:
+        pass
 
 
 risk   = RiskManager(
@@ -308,6 +319,7 @@ async def bg_auto_scanner():
                                   f"veto:{signal.get('veto_decision','APPROVE')}")
                         signals_found.append(signal)
                         notifier.send_signal(signal)
+                        desk.notify_signal(signal)
                         if AUTO_TRADE:
                             await maybe_execute(signal)
                     else:
@@ -425,6 +437,7 @@ async def maybe_execute(signal: Dict):
             await broadcast({'type': 'trade_opened', 'order': result, 'signal': signal})
             log_trade(f"OPENED | {signal['action']} {qty} {signal['symbol']} @ {entry} | SL:{sl} TP1:{tp1} | id:{order_id}")
             notifier.send_trade_opened(signal['symbol'], signal['action'], qty, entry, sl, tp1)
+            desk.notify_trade_opened(signal['symbol'], signal['action'], entry, sl, tp1)
     except Exception as e:
         log_trade(f"ERROR | {signal.get('symbol')} | {e}")
         print(f'[Trade] Error placing order: {e}')
